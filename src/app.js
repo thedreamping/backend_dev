@@ -106,6 +106,23 @@ app.get("/api/rooms", verifyToken, async (req, res) => {
   }
 });
 
+app.get("/api/options", verifyToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT * FROM options ORDER BY id ASC`);
+
+    return res.json({
+      ok: true,
+      data: rows,
+    });
+  } catch (e) {
+    console.error("options fetch error:", e);
+    res.status(500).json({
+      ok: false,
+      message: "options 조회 중 오류 발생",
+    });
+  }
+});
+
 // 예시 라우트(원하시는 테이블 라우터로 교체/추가)
 app.use("/api/users", usersRouter);
 
