@@ -6,8 +6,23 @@ import errorMiddleware from "./middlewares/error.js";
 import jwt from "jsonwebtoken";
 import verifyToken from "./middlewares/verifyToken.js";
 import pool from "./db.js";
-
+import multer from "multer";
+import path from "path";
 const app = express();
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/");
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    const basename = path.basename(file.originalname, ext);
+    // 파일명-날짜.확장자 형태로 깔끔하게 저장!
+    cb(null, `${basename}-${Date.now()}${ext}`);
+  },
+});
+
+const upload = multer({ storage: storage });
 
 const tokenReissue = async (req, res) => {
   try {
@@ -122,9 +137,87 @@ app.get("/api/options", verifyToken, async (req, res) => {
     });
   }
 });
+app.post("/api/main-banner", upload.array("file"), async (req, res) => {
+  try {
+    const files = req.files || [];
+
+    // multer + formData 특성상
+    // 값이 1개면 문자열, 여러개면 배열로 들어올 수 있음
+    const normalizeToArray = (value) => {
+      if (!value) return [];
+      return Array.isArray(value) ? value : [value];
+    };
+
+    const file_name = normalizeToArray(req.body.file_name);
+    const text = normalizeToArray(req.body.text);
+    const link = normalizeToArray(req.body.link);
+    const file_url = normalizeToArray(req.body.file_url);
+
+    // 필수값 체크
+    if (!text.length || text.length !== link.length) {
+      return res.status(400).json({ message: "데이터 형식 오류" });
+    }
+
+    // 🔥 기존 데이터 전체 삭제
+    await pool.query("DELETE FROM main_banners");
+
+    for (let i = 0; i < text.length; i++) {
+      let finalFileUrl;
+
+      // 새 파일이 있으면 그걸 사용
+      if (files[i]) {
+        finalFileUrl = `/uploads/${files[i].filename}`;
+      }
+      // 새 파일 없으면 기존 파일 유지
+      else if (file_url[i]) {
+        finalFileUrl = file_url[i];
+      }
+      // 둘 다 없으면 에러
+      else {
+        return res.status(400).json({
+          message: `이미지 파일이 누락되었습니다. index: ${i}`,
+        });
+      }
+
+      await pool.query(
+        `
+        INSERT INTO main_banners (file_name, text, link, file_url)
+        VALUES (?, ?, ?, ?)
+        `,
+        [file_name[i] || "", text[i], link[i], finalFileUrl],
+      );
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("main-banner save error:", err);
+    return res.status(500).json({ message: "서버 오류" });
+  }
+});
+
+app.get("/api/get-main-banner", async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT * FROM main_banners ORDER BY id ASC`,
+    );
+
+    return res.json({
+      ok: true,
+      data: rows,
+    });
+  } catch (err) {
+    console.error("main-banner fetch error:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "메인 배너 조회 중 오류 발생",
+    });
+  }
+});
 
 // 예시 라우트(원하시는 테이블 라우터로 교체/추가)
 app.use("/api/users", usersRouter);
+
+app.use("/uploads", express.static("uploads"));
 
 // 404 핸들러
 app.use((req, res, next) => {
