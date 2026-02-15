@@ -142,7 +142,6 @@ app.post("/api/main-banner", upload.array("file"), async (req, res) => {
     const files = req.files || [];
 
     // multer + formData 특성상
-    // 값이 1개면 문자열, 여러개면 배열로 들어올 수 있음
     const normalizeToArray = (value) => {
       if (!value) return [];
       return Array.isArray(value) ? value : [value];
@@ -152,6 +151,7 @@ app.post("/api/main-banner", upload.array("file"), async (req, res) => {
     const text = normalizeToArray(req.body.text);
     const link = normalizeToArray(req.body.link);
     const file_url = normalizeToArray(req.body.file_url);
+    const file_index = normalizeToArray(req.body.file_index); // 새 파일의 슬라이드 index
 
     // 필수값 체크
     if (!text.length || text.length !== link.length) {
@@ -161,12 +161,21 @@ app.post("/api/main-banner", upload.array("file"), async (req, res) => {
     // 🔥 기존 데이터 전체 삭제
     await pool.query("DELETE FROM main_banners");
 
+    // 새 파일과 슬라이드를 index로 매칭
+    const fileMap = {}; // index: fileUrl
+    files.forEach((file, idx) => {
+      const index = parseInt(file_index[idx], 10);
+      if (!isNaN(index)) {
+        fileMap[index] = `/uploads/${file.filename}`;
+      }
+    });
+
     for (let i = 0; i < text.length; i++) {
       let finalFileUrl;
 
-      // 새 파일이 있으면 그걸 사용
-      if (files[i]) {
-        finalFileUrl = `/uploads/${files[i].filename}`;
+      // 새 파일이 있으면 해당 index에서 가져오기
+      if (fileMap[i]) {
+        finalFileUrl = fileMap[i];
       }
       // 새 파일 없으면 기존 파일 유지
       else if (file_url[i]) {
