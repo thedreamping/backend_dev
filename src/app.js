@@ -223,6 +223,67 @@ app.get("/api/get-main-banner", async (req, res) => {
   }
 });
 
+app.post("/api/room-price", verifyToken, async (req, res) => {
+  try {
+    const { dates, rooms } = req.body;
+
+    if (!dates || !rooms || !Array.isArray(dates) || !Array.isArray(rooms)) {
+      return res.status(400).json({
+        ok: false,
+        message: "잘못된 요청 형식입니다.",
+      });
+    }
+
+    const insertValues = [];
+
+    for (const date of dates) {
+      for (const room of rooms) {
+        const price = Number(room.price);
+
+        if (!room.room_group_id || !room.room_group_name) continue;
+        if (!price || price <= 0) continue;
+
+        insertValues.push([
+          room.room_group_id,
+          date,
+          price,
+          room.room_group_name,
+        ]);
+      }
+    }
+
+    if (insertValues.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "저장할 가격 데이터가 없습니다.",
+      });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO room_price 
+      (room_group_id, date, price, room_group_name)
+      VALUES ?
+      ON DUPLICATE KEY UPDATE
+        price = VALUES(price),
+        room_group_name = VALUES(room_group_name)
+      `,
+      [insertValues],
+    );
+
+    return res.json({
+      ok: true,
+      message: "객실 가격 저장(덮어쓰기) 완료",
+    });
+  } catch (error) {
+    console.error("room_price upsert error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "객실 가격 저장 중 오류 발생",
+    });
+  }
+});
+
 // 예시 라우트(원하시는 테이블 라우터로 교체/추가)
 app.use("/api/users", usersRouter);
 
