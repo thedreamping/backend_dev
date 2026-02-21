@@ -283,6 +283,66 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
     });
   }
 });
+app.get("/api/room-price", verifyToken, async (req, res) => {
+  try {
+    let { year, month, roomId } = req.query;
+
+    if (!year || !month) {
+      return res.status(400).json({
+        ok: false,
+        message: "year, month는 필수입니다.",
+      });
+    }
+
+    month = String(month).padStart(2, "0");
+
+    // 시작일
+    const startDate = `${year}-${month}-01`;
+
+    // 다음 달 계산
+    const nextMonthDate = new Date(Number(year), Number(month), 1);
+    const nextYear = nextMonthDate.getFullYear();
+    const nextMonthStr = String(nextMonthDate.getMonth() + 1).padStart(2, "0");
+    const endDate = `${nextYear}-${nextMonthStr}-01`;
+
+    let query = `
+      SELECT
+        id,
+        room_group_id,
+        room_group_name,
+        price,
+        DATE_FORMAT(date, '%Y-%m-%d') AS date
+      FROM room_price
+      WHERE date >= ? AND date < ?
+    `;
+
+    const params = [startDate, endDate];
+
+    // roomId 선택 조건
+    if (roomId !== undefined && roomId !== null && roomId !== "") {
+      const parsedRoomId = Number(roomId);
+      if (!isNaN(parsedRoomId)) {
+        query += ` AND room_group_id = ?`;
+        params.push(parsedRoomId);
+      }
+    }
+
+    query += ` ORDER BY date ASC`;
+
+    const [rows] = await pool.query(query, params);
+
+    return res.json({
+      ok: true,
+      data: rows,
+    });
+  } catch (error) {
+    console.error("room_price fetch error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "객실 가격 조회 중 오류 발생",
+    });
+  }
+});
 
 // 예시 라우트(원하시는 테이블 라우터로 교체/추가)
 app.use("/api/users", usersRouter);
