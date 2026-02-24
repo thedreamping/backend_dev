@@ -344,6 +344,218 @@ app.get("/api/room-price", verifyToken, async (req, res) => {
   }
 });
 
+app.put("/api/room/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, is_active, reason } = req.body;
+
+    if (!name || typeof is_active === "undefined") {
+      return res.status(400).json({
+        ok: false,
+        message: "name, is_active는 필수입니다.",
+      });
+    }
+
+    // 🔥 비활성화 시 사유 필수
+    if (Number(is_active) === 0 && (!reason || reason.trim() === "")) {
+      return res.status(400).json({
+        ok: false,
+        message: "비활성화 시 사유는 필수입니다.",
+      });
+    }
+
+    // 🔥 활성화 시 reason은 무조건 NULL
+    const finalReason = Number(is_active) === 1 ? null : reason.trim();
+
+    const [result] = await pool.query(
+      `
+      UPDATE room
+      SET name = ?,
+          is_active = ?,
+          reason = ?
+      WHERE id = ?
+      `,
+      [name, Number(is_active), finalReason, id],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "해당 객실을 찾을 수 없습니다.",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      message: "객실 정보 수정 완료",
+    });
+  } catch (error) {
+    console.error("room update error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "객실 수정 중 오류 발생",
+    });
+  }
+});
+
+app.put("/api/room-group/:id", verifyToken, async (req, res) => {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+    const { name, is_active, reason } = req.body;
+
+    if (!name || typeof is_active === "undefined") {
+      await connection.rollback();
+      return res.status(400).json({
+        ok: false,
+        message: "name, is_active는 필수입니다.",
+      });
+    }
+
+    if (Number(is_active) === 0 && (!reason || reason.trim() === "")) {
+      await connection.rollback();
+      return res.status(400).json({
+        ok: false,
+        message: "비활성화 시 사유는 필수입니다.",
+      });
+    }
+
+    const finalReason = Number(is_active) === 1 ? null : reason.trim();
+
+    // 1️⃣ 그룹 업데이트
+    const [result] = await connection.query(
+      `
+      UPDATE room_group
+      SET name = ?, is_active = ?, reason = ?
+      WHERE id = ?
+      `,
+      [name, Number(is_active), finalReason, id],
+    );
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      return res.status(404).json({
+        ok: false,
+        message: "해당 객실 그룹을 찾을 수 없습니다.",
+      });
+    }
+
+    // 2️⃣ 그룹이 비활성화면 하위 room도 비활성화
+    if (Number(is_active) === 0) {
+      await connection.query(
+        `
+        UPDATE room
+        SET is_active = 0,
+            reason = '상위 그룹 비활성화'
+        WHERE room_group_id = ?
+        `,
+        [id],
+      );
+    }
+
+    // 3️⃣ 그룹이 활성화면 하위 room도 활성화 + reason NULL
+    if (Number(is_active) === 1) {
+      await connection.query(
+        `
+        UPDATE room
+        SET is_active = 1,
+            reason = NULL
+        WHERE room_group_id = ?
+        `,
+        [id],
+      );
+    }
+
+    await connection.commit();
+
+    return res.json({
+      ok: true,
+      message: "객실 그룹 수정 완료",
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error("room_group update error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "객실 그룹 수정 중 오류 발생",
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete("/api/room/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [result] = await pool.query(`DELETE FROM room WHERE id = ?`, [id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "해당 객실을 찾을 수 없습니다.",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      message: "객실 삭제 완료",
+    });
+  } catch (error) {
+    console.error("room delete error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "객실 삭제 중 오류 발생",
+    });
+  }
+});
+
+app.delete("/api/room-group/:id", verifyToken, async (req, res) => {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+
+    // 1️⃣ 하위 룸 삭제
+    await connection.query(`DELETE FROM room WHERE room_group_id = ?`, [id]);
+
+    // 2️⃣ 그룹 삭제
+    const [result] = await connection.query(
+      `DELETE FROM room_group WHERE id = ?`,
+      [id],
+    );
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      return res.status(404).json({
+        ok: false,
+        message: "해당 객실 그룹을 찾을 수 없습니다.",
+      });
+    }
+
+    await connection.commit();
+
+    return res.json({
+      ok: true,
+      message: "객실 그룹 및 하위 룸 삭제 완료",
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error("room_group delete error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "객실 그룹 삭제 중 오류 발생",
+    });
+  } finally {
+    connection.release();
+  }
+});
+
 // 예시 라우트(원하시는 테이블 라우터로 교체/추가)
 app.use("/api/users", usersRouter);
 
