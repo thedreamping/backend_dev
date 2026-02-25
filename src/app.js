@@ -137,6 +137,60 @@ app.get("/api/options", verifyToken, async (req, res) => {
     });
   }
 });
+
+app.put("/api/options/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, price, start_date, end_date } = req.body;
+
+    // 🔎 필수값 체크
+    if (!name || !price || !start_date || !end_date) {
+      return res.status(400).json({
+        ok: false,
+        message: "name, price, start_date, end_date는 필수입니다.",
+      });
+    }
+
+    // 🔎 날짜 유효성 체크 (선택사항이지만 추천)
+    if (new Date(start_date) > new Date(end_date)) {
+      return res.status(400).json({
+        ok: false,
+        message: "start_date는 end_date보다 클 수 없습니다.",
+      });
+    }
+
+    const [result] = await pool.query(
+      `
+      UPDATE options
+      SET name = ?,
+          price = ?,
+          start_date = ?,
+          end_date = ?
+      WHERE id = ?
+      `,
+      [name, Number(price), start_date, end_date, id],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "해당 옵션을 찾을 수 없습니다.",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      message: "옵션 수정 완료",
+    });
+  } catch (error) {
+    console.error("options update error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "옵션 수정 중 오류 발생",
+    });
+  }
+});
+
 app.post("/api/main-banner", upload.array("file"), async (req, res) => {
   try {
     const files = req.files || [];
