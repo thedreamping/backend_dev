@@ -141,18 +141,41 @@ app.get("/api/options", verifyToken, async (req, res) => {
 app.put("/api/options/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, price, start_date, end_date } = req.body;
+    const {
+      name,
+      price,
+      start_date,
+      end_date,
+      start_date_able,
+      end_date_able,
+    } = req.body;
 
     // 🔎 필수값 체크
-    if (!name || !price || !start_date || !end_date) {
+    if (
+      !name ||
+      !price ||
+      !start_date ||
+      !end_date ||
+      !start_date_able ||
+      !end_date_able
+    ) {
       return res.status(400).json({
         ok: false,
-        message: "name, price, start_date, end_date는 필수입니다.",
+        message:
+          "name, price, start_date, end_date,  start_date_able, end_date_able  는 필수입니다.",
       });
     }
 
     // 🔎 날짜 유효성 체크 (선택사항이지만 추천)
     if (new Date(start_date) > new Date(end_date)) {
+      return res.status(400).json({
+        ok: false,
+        message: "start_date는 end_date보다 클 수 없습니다.",
+      });
+    }
+
+    // 🔎 날짜 유효성 체크 (선택사항이지만 추천)
+    if (new Date(start_date_able) > new Date(end_date_able)) {
       return res.status(400).json({
         ok: false,
         message: "start_date는 end_date보다 클 수 없습니다.",
@@ -165,10 +188,20 @@ app.put("/api/options/:id", verifyToken, async (req, res) => {
       SET name = ?,
           price = ?,
           start_date = ?,
-          end_date = ?
+          end_date = ?,
+          start_date_able = ?,
+          end_date_able = ?
       WHERE id = ?
       `,
-      [name, Number(price), start_date, end_date, id],
+      [
+        name,
+        Number(price),
+        start_date,
+        end_date,
+        start_date_able,
+        end_date_able,
+        id,
+      ],
     );
 
     if (result.affectedRows === 0) {
@@ -187,6 +220,131 @@ app.put("/api/options/:id", verifyToken, async (req, res) => {
     return res.status(500).json({
       ok: false,
       message: "옵션 수정 중 오류 발생",
+    });
+  }
+});
+
+app.post("/api/options", verifyToken, async (req, res) => {
+  try {
+    const {
+      name,
+      price,
+      start_date,
+      end_date,
+      start_date_able,
+      end_date_able,
+    } = req.body;
+
+    // 🔎 필수값 체크
+    if (
+      !name ||
+      price === undefined ||
+      !start_date ||
+      !end_date ||
+      !start_date_able ||
+      !end_date_able
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message:
+          "name, price, start_date, end_date, start_date_able, end_date_able 는 필수입니다.",
+      });
+    }
+
+    const numericPrice = Number(price);
+
+    if (isNaN(numericPrice) || numericPrice < 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "price는 0 이상 숫자여야 합니다.",
+      });
+    }
+
+    // 🔎 날짜 유효성 체크
+    if (new Date(start_date) > new Date(end_date)) {
+      return res.status(400).json({
+        ok: false,
+        message: "start_date는 end_date보다 클 수 없습니다.",
+      });
+    }
+
+    if (new Date(start_date_able) > new Date(end_date_able)) {
+      return res.status(400).json({
+        ok: false,
+        message: "start_date_able는 end_date_able보다 클 수 없습니다.",
+      });
+    }
+
+    // 🔥 예약 가능 기간이 옵션 기간 안에 포함되는지 체크
+    if (
+      new Date(start_date_able) < new Date(start_date) ||
+      new Date(end_date_able) > new Date(end_date)
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message: "예약 가능 기간은 옵션 기간 안에 포함되어야 합니다.",
+      });
+    }
+
+    const [result] = await pool.query(
+      `
+      INSERT INTO options
+      (name, price, start_date, end_date, start_date_able, end_date_able, is_use)
+      VALUES (?, ?, ?, ?, ?, ?, 1)
+      `,
+      [
+        name,
+        numericPrice,
+        start_date,
+        end_date,
+        start_date_able,
+        end_date_able,
+      ],
+    );
+
+    return res.json({
+      ok: true,
+      message: "옵션 생성 완료",
+      id: result.insertId,
+    });
+  } catch (error) {
+    console.error("options create error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "옵션 생성 중 오류 발생",
+    });
+  }
+});
+
+app.delete("/api/options/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        ok: false,
+        message: "옵션 ID는 필수입니다.",
+      });
+    }
+
+    const [result] = await pool.query(`DELETE FROM options WHERE id = ?`, [id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "해당 옵션을 찾을 수 없습니다.",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      message: "옵션 삭제 완료",
+    });
+  } catch (error) {
+    console.error("options delete error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "옵션 삭제 중 오류 발생",
     });
   }
 });
