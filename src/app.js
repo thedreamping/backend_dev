@@ -559,12 +559,40 @@ app.get("/api/room-price", verifyToken, async (req, res) => {
 app.put("/api/room/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, is_active, reason } = req.body;
 
-    if (!name || typeof is_active === "undefined") {
+    const { name, is_active, reason, capacity_max, capacity_min, day_use } =
+      req.body;
+
+    // ✅ 필수값 체크
+    if (
+      !name ||
+      typeof is_active === "undefined" ||
+      capacity_max === undefined ||
+      capacity_min === undefined ||
+      day_use === undefined
+    ) {
       return res.status(400).json({
         ok: false,
-        message: "name, is_active는 필수입니다.",
+        message:
+          "name, is_active, capacity_max, capacity_min, day_use는 필수입니다.",
+      });
+    }
+
+    const numericMax = Number(capacity_max);
+    const numericMin = Number(capacity_min);
+    const numericDayUse = Number(day_use);
+
+    if (isNaN(numericMax) || isNaN(numericMin) || numericMax < numericMin) {
+      return res.status(400).json({
+        ok: false,
+        message: "capacity 값이 올바르지 않습니다.",
+      });
+    }
+
+    if (numericDayUse !== 0 && numericDayUse !== 1) {
+      return res.status(400).json({
+        ok: false,
+        message: "day_use는 0 또는 1이어야 합니다.",
       });
     }
 
@@ -576,9 +604,38 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       });
     }
 
-    // 🔥 활성화 시 reason은 무조건 NULL
     const finalReason = Number(is_active) === 1 ? null : reason.trim();
+    const lodgement = numericDayUse === 1 ? 0 : 1;
 
+    // ✅ 1️⃣ 해당 room의 group id 조회
+    const [roomRows] = await pool.query(
+      `SELECT room_group_id FROM room WHERE id = ?`,
+      [id],
+    );
+
+    if (roomRows.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "해당 객실을 찾을 수 없습니다.",
+      });
+    }
+
+    const roomGroupId = roomRows[0].room_group_id;
+
+    // ✅ 2️⃣ 그룹 전체 capacity/day_use/lodgement 일괄 수정
+    await pool.query(
+      `
+      UPDATE room
+      SET capacity_max = ?,
+          capacity_min = ?,
+          day_use = ?,
+          lodgement = ?
+      WHERE room_group_id = ?
+      `,
+      [numericMax, numericMin, numericDayUse, lodgement, roomGroupId],
+    );
+
+    // ✅ 3️⃣ 해당 id 하나만 name/is_active/reason 수정
     const [result] = await pool.query(
       `
       UPDATE room
@@ -587,15 +644,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           reason = ?
       WHERE id = ?
       `,
-      [name, Number(is_active), finalReason, id],
+      [name.trim(), Number(is_active), finalReason, id],
     );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        ok: false,
-        message: "해당 객실을 찾을 수 없습니다.",
-      });
-    }
 
     return res.json({
       ok: true,
@@ -765,6 +815,137 @@ app.delete("/api/room-group/:id", verifyToken, async (req, res) => {
     });
   } finally {
     connection.release();
+  }
+});
+
+app.post("/api/room-group", verifyToken, async (req, res) => {
+  try {
+    const { name, description } = req.body;
+
+    // 🔎 필수값 체크
+    if (!name || name.trim() === "") {
+      return res.status(400).json({
+        ok: false,
+        message: "name은 필수입니다.",
+      });
+    }
+
+    // 🔥 description은 선택값으로 처리 가능
+    const finalDescription =
+      description && description.trim() !== "" ? description.trim() : null;
+
+    const [result] = await pool.query(
+      `
+      INSERT INTO room_group
+      (name, description, is_active, reason)
+      VALUES (?, ?, 1, NULL)
+      `,
+      [name.trim(), finalDescription],
+    );
+
+    return res.json({
+      ok: true,
+      message: "객실 그룹 생성 완료",
+      id: result.insertId,
+    });
+  } catch (error) {
+    console.error("room_group create error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "객실 그룹 생성 중 오류 발생",
+    });
+  }
+});
+
+app.post("/api/room", verifyToken, async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      room_group_id,
+      capacity_max,
+      capacity_min,
+      day_use,
+    } = req.body;
+
+    // ✅ 필수값 체크
+    if (
+      !name ||
+      !room_group_id ||
+      capacity_max === undefined ||
+      capacity_min === undefined ||
+      day_use === undefined
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message:
+          "name, room_group_id, capacity_max, capacity_min, day_use는 필수입니다.",
+      });
+    }
+
+    const numericMax = Number(capacity_max);
+    const numericMin = Number(capacity_min);
+    const numericDayUse = Number(day_use);
+
+    if (isNaN(numericMax) || isNaN(numericMin) || numericMax < numericMin) {
+      return res.status(400).json({
+        ok: false,
+        message: "capacity 값이 올바르지 않습니다.",
+      });
+    }
+
+    if (numericDayUse !== 0 && numericDayUse !== 1) {
+      return res.status(400).json({
+        ok: false,
+        message: "day_use는 0 또는 1이어야 합니다.",
+      });
+    }
+
+    // 🔥 lodgement 자동 결정
+    const lodgement = numericDayUse === 1 ? 0 : 1;
+
+    const finalDescription =
+      description && description.trim() !== "" ? description.trim() : null;
+
+    const [result] = await pool.query(
+      `
+      INSERT INTO room
+      (
+        name,
+        description,
+        capacity_max,
+        capacity_min,
+        room_group_id,
+        available,
+        is_active,
+        day_use,
+        lodgement,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, NULL)
+      `,
+      [
+        name.trim(),
+        finalDescription,
+        numericMax,
+        numericMin,
+        room_group_id,
+        numericDayUse,
+        lodgement,
+      ],
+    );
+
+    return res.json({
+      ok: true,
+      message: "객실 생성 완료",
+      id: result.insertId,
+    });
+  } catch (error) {
+    console.error("room create error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "객실 생성 중 오류 발생",
+    });
   }
 });
 
