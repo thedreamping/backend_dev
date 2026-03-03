@@ -87,7 +87,7 @@ app.get("/health", (req, res) => {
 });
 app.post("/api/users/token/reissue", tokenReissue);
 
-app.get("/api/room_group", verifyToken, async (req, res) => {
+app.get("/api/room_group", async (req, res) => {
   try {
     const [rows] = await pool.query(`SELECT * FROM room_group ORDER BY id ASC`);
 
@@ -104,7 +104,7 @@ app.get("/api/room_group", verifyToken, async (req, res) => {
   }
 });
 
-app.get("/api/rooms", verifyToken, async (req, res) => {
+app.get("/api/rooms", async (req, res) => {
   try {
     const [rows] = await pool.query(`SELECT * FROM room ORDER BY id ASC`);
 
@@ -121,7 +121,7 @@ app.get("/api/rooms", verifyToken, async (req, res) => {
   }
 });
 
-app.get("/api/options", verifyToken, async (req, res) => {
+app.get("/api/options", async (req, res) => {
   try {
     const [rows] = await pool.query(`SELECT * FROM options ORDER BY id ASC`);
 
@@ -495,7 +495,7 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
     });
   }
 });
-app.get("/api/room-price", verifyToken, async (req, res) => {
+app.get("/api/room-price", async (req, res) => {
   try {
     let { year, month, roomId } = req.query;
 
@@ -945,6 +945,182 @@ app.post("/api/room", verifyToken, async (req, res) => {
     return res.status(500).json({
       ok: false,
       message: "객실 생성 중 오류 발생",
+    });
+  }
+});
+
+app.post("/api/reservation", async (req, res) => {
+  try {
+    const { name, phone, email, startDate, endDate, roomInfo, options, price } =
+      req.body;
+
+    // ------------------------
+    // 1️⃣ 기본 유효성 검사
+    // ------------------------
+
+    if (
+      !name ||
+      !phone ||
+      !email ||
+      !startDate ||
+      !endDate ||
+      !roomInfo ||
+      !price
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message: "필수값 누락",
+      });
+    }
+
+    if (!roomInfo.id || !roomInfo.name || !roomInfo.final_price) {
+      return res.status(400).json({
+        ok: false,
+        message: "객실 정보 오류",
+      });
+    }
+
+    const numericPrice = Number(price);
+
+    if (isNaN(numericPrice) || numericPrice <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "금액 오류",
+      });
+    }
+
+    // ------------------------
+    // 2️⃣ 옵션 정리
+    // ------------------------
+
+    const safeOptions =
+      Array.isArray(options) && options.length > 0
+        ? JSON.stringify(options)
+        : null;
+
+    // ------------------------
+    // 3️⃣ DB 저장 (pending)
+    // ------------------------
+
+    const [result] = await pool.query(
+      `
+      INSERT INTO reservation_info
+      (
+        name,
+        phone,
+        email,
+        start_date,
+        end_date,
+        room_id,
+        room_name,
+        base_price,
+        total_price,
+        options,
+        status
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      `,
+      [
+        name.trim(),
+        phone.trim(),
+        email.trim(),
+        startDate,
+        endDate,
+        roomInfo.id,
+        roomInfo.name,
+        Number(roomInfo.final_price),
+        numericPrice,
+        safeOptions,
+      ],
+    );
+
+    return res.json({
+      ok: true,
+      id: result.insertId, // 🔥 이게 reservationId
+    });
+  } catch (error) {
+    console.error("reservation create error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "예약 생성 중 오류 발생",
+    });
+  }
+});
+
+app.post("/api/payment/ready", async (req, res) => {
+  try {
+    const { reservationId } = req.body;
+
+    if (!reservationId) {
+      return res.status(400).json({
+        ok: false,
+        message: "reservationId 필요",
+      });
+    }
+
+    // 1️⃣ 예약 조회
+    const [rows] = await pool.query(
+      `SELECT * FROM reservation_info WHERE id = ?`,
+      [reservationId],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "예약 정보 없음",
+      });
+    }
+
+    const reservation = rows[0];
+
+    if (reservation.status !== "pending") {
+      return res.status(400).json({
+        ok: false,
+        message: "이미 처리된 예약입니다.",
+      });
+    }
+
+    const mid = process.env.INICIS_MID;
+    const signKey = process.env.INICIS_SIGN_KEY;
+
+    // 2️⃣ orderId 생성 (고유값)
+    const oid = `ORD-${reservation.id}-${Date.now()}`;
+
+    // 3️⃣ timestamp
+    const timestamp = Date.now().toString();
+
+    const price = reservation.total_price.toString();
+
+    // 4️⃣ signature 생성
+    const signature = crypto
+      .createHash("sha256")
+      .update(`oid=${oid}&price=${price}&timestamp=${timestamp}${signKey}`)
+      .digest("hex");
+
+    // 5️⃣ mKey 생성
+    const mKey = crypto.createHash("sha256").update(signKey).digest("hex");
+
+    // 6️⃣ reservation에 orderId 저장
+    await pool.query(`UPDATE reservation_info SET order_id = ? WHERE id = ?`, [
+      oid,
+      reservation.id,
+    ]);
+
+    return res.json({
+      ok: true,
+      mid,
+      oid,
+      price,
+      timestamp,
+      signature,
+      mKey,
+      returnUrl: process.env.INICIS_RETURN_URL,
+    });
+  } catch (error) {
+    console.error("payment ready error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "결제 준비 중 오류 발생",
     });
   }
 });
