@@ -951,21 +951,27 @@ app.post("/api/room", verifyToken, async (req, res) => {
 
 app.post("/api/reservation", async (req, res) => {
   try {
-    const { name, phone, email, startDate, endDate, roomInfo, options, price } =
-      req.body;
-
-    // ------------------------
-    // 1️⃣ 기본 유효성 검사
-    // ------------------------
+    const {
+      room_group_id,
+      check_in,
+      check_out,
+      nights,
+      total_amount,
+      buyer_name,
+      buyer_tel,
+      buyer_email,
+      memo,
+      options,
+    } = req.body;
 
     if (
-      !name ||
-      !phone ||
-      !email ||
-      !startDate ||
-      !endDate ||
-      !roomInfo ||
-      !price
+      !room_group_id ||
+      !check_in ||
+      !check_out ||
+      !nights ||
+      !total_amount ||
+      !buyer_name ||
+      !buyer_tel
     ) {
       return res.status(400).json({
         ok: false,
@@ -973,14 +979,7 @@ app.post("/api/reservation", async (req, res) => {
       });
     }
 
-    if (!roomInfo.id || !roomInfo.name || !roomInfo.final_price) {
-      return res.status(400).json({
-        ok: false,
-        message: "객실 정보 오류",
-      });
-    }
-
-    const numericPrice = Number(price);
+    const numericPrice = Number(total_amount);
 
     if (isNaN(numericPrice) || numericPrice <= 0) {
       return res.status(400).json({
@@ -989,64 +988,53 @@ app.post("/api/reservation", async (req, res) => {
       });
     }
 
-    // ------------------------
-    // 2️⃣ 옵션 정리
-    // ------------------------
-
-    const safeOptions =
-      Array.isArray(options) && options.length > 0
-        ? JSON.stringify(options)
-        : null;
-
-    // ------------------------
-    // 3️⃣ DB 저장 (pending)
-    // ------------------------
-
     const [result] = await pool.query(
       `
       INSERT INTO reservation_info
       (
-        name,
-        phone,
-        email,
-        start_date,
-        end_date,
-        room_id,
-        room_name,
-        base_price,
-        total_price,
+        room_group_id,
+        check_in,
+        check_out,
+        nights,
+        total_amount,
+        status,
+        buyer_name,
+        buyer_tel,
+        buyer_email,
+        memo,
         options,
-        status
+        created_at,
+        updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
-        name.trim(),
-        phone.trim(),
-        email.trim(),
-        startDate,
-        endDate,
-        roomInfo.id,
-        roomInfo.name,
-        Number(roomInfo.final_price),
+        room_group_id,
+        check_in,
+        check_out,
+        nights,
         numericPrice,
-        safeOptions,
+        buyer_name.trim(),
+        buyer_tel.trim(),
+        buyer_email ? buyer_email.trim() : null,
+        memo ? memo.trim() : null,
+        options ? JSON.stringify(options) : null,
       ],
     );
 
     return res.json({
       ok: true,
-      id: result.insertId, // 🔥 이게 reservationId
+      reservationId: result.insertId,
     });
   } catch (error) {
     console.error("reservation create error:", error);
+
     return res.status(500).json({
       ok: false,
-      message: "예약 생성 중 오류 발생",
+      message: "예약 저장 실패",
     });
   }
 });
-
 app.post("/api/payment/ready", async (req, res) => {
   try {
     const { reservationId } = req.body;
@@ -1058,11 +1046,9 @@ app.post("/api/payment/ready", async (req, res) => {
       });
     }
 
-    // 1️⃣ 예약 조회
-    const [rows] = await pool.query(
-      `SELECT * FROM reservation_info WHERE id = ?`,
-      [reservationId],
-    );
+    const [rows] = await pool.query(`SELECT * FROM reservations WHERE id = ?`, [
+      reservationId,
+    ]);
 
     if (rows.length === 0) {
       return res.status(404).json({
@@ -1073,7 +1059,7 @@ app.post("/api/payment/ready", async (req, res) => {
 
     const reservation = rows[0];
 
-    if (reservation.status !== "pending") {
+    if (reservation.status !== "PENDING") {
       return res.status(400).json({
         ok: false,
         message: "이미 처리된 예약입니다.",
@@ -1083,25 +1069,22 @@ app.post("/api/payment/ready", async (req, res) => {
     const mid = process.env.INICIS_MID;
     const signKey = process.env.INICIS_SIGN_KEY;
 
-    // 2️⃣ orderId 생성 (고유값)
     const oid = `ORD-${reservation.id}-${Date.now()}`;
 
-    // 3️⃣ timestamp
     const timestamp = Date.now().toString();
 
-    const price = reservation.total_price.toString();
+    const price = reservation.total_amount.toString();
 
-    // 4️⃣ signature 생성
+    const crypto = require("crypto");
+
     const signature = crypto
       .createHash("sha256")
       .update(`oid=${oid}&price=${price}&timestamp=${timestamp}${signKey}`)
       .digest("hex");
 
-    // 5️⃣ mKey 생성
     const mKey = crypto.createHash("sha256").update(signKey).digest("hex");
 
-    // 6️⃣ reservation에 orderId 저장
-    await pool.query(`UPDATE reservation_info SET order_id = ? WHERE id = ?`, [
+    await pool.query(`UPDATE reservations SET order_id = ? WHERE id = ?`, [
       oid,
       reservation.id,
     ]);
@@ -1118,6 +1101,7 @@ app.post("/api/payment/ready", async (req, res) => {
     });
   } catch (error) {
     console.error("payment ready error:", error);
+
     return res.status(500).json({
       ok: false,
       message: "결제 준비 중 오류 발생",
