@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "crypto";
 import morgan from "morgan";
 import cors from "cors";
 import usersRouter from "./routes/user.routes.js"; // 예시 라우트
@@ -1134,34 +1135,25 @@ app.post("/api/room", verifyToken, async (req, res) => {
 app.post("/api/reservation", async (req, res) => {
   try {
     const {
-      room_group_id,
-      check_in,
-      check_out,
-      nights,
-      total_amount,
-      buyer_name,
-      buyer_tel,
-      buyer_email,
+      name,
+      phone,
+      email,
       memo,
+      startDate,
+      endDate,
+      roomInfo,
       options,
+      price,
     } = req.body;
 
-    if (
-      !room_group_id ||
-      !check_in ||
-      !check_out ||
-      !nights ||
-      !total_amount ||
-      !buyer_name ||
-      !buyer_tel
-    ) {
+    if (!name || !phone || !startDate || !endDate || !roomInfo) {
       return res.status(400).json({
         ok: false,
         message: "필수값 누락",
       });
     }
 
-    const numericPrice = Number(total_amount);
+    const numericPrice = Number(price);
 
     if (isNaN(numericPrice) || numericPrice <= 0) {
       return res.status(400).json({
@@ -1169,6 +1161,13 @@ app.post("/api/reservation", async (req, res) => {
         message: "금액 오류",
       });
     }
+
+    const check_in = startDate;
+    const check_out = endDate;
+
+    const nights = Math.ceil(
+      (new Date(check_out) - new Date(check_in)) / (1000 * 60 * 60 * 24),
+    );
 
     const [result] = await pool.query(
       `
@@ -1191,14 +1190,14 @@ app.post("/api/reservation", async (req, res) => {
       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
-        room_group_id,
+        roomInfo.room_group_id,
         check_in,
         check_out,
         nights,
         numericPrice,
-        buyer_name.trim(),
-        buyer_tel.trim(),
-        buyer_email ? buyer_email.trim() : null,
+        name.trim(),
+        phone.trim(),
+        email ? email.trim() : null,
         memo ? memo.trim() : null,
         options ? JSON.stringify(options) : null,
       ],
@@ -1217,6 +1216,7 @@ app.post("/api/reservation", async (req, res) => {
     });
   }
 });
+
 app.post("/api/payment/ready", async (req, res) => {
   try {
     const { reservationId } = req.body;
@@ -1228,9 +1228,10 @@ app.post("/api/payment/ready", async (req, res) => {
       });
     }
 
-    const [rows] = await pool.query(`SELECT * FROM reservations WHERE id = ?`, [
-      reservationId,
-    ]);
+    const [rows] = await pool.query(
+      "SELECT * FROM reservation_info WHERE id = ?",
+      [reservationId],
+    );
 
     if (rows.length === 0) {
       return res.status(404).json({
@@ -1241,35 +1242,38 @@ app.post("/api/payment/ready", async (req, res) => {
 
     const reservation = rows[0];
 
-    if (reservation.status !== "PENDING") {
+    if (reservation.status !== "pending") {
       return res.status(400).json({
         ok: false,
         message: "이미 처리된 예약입니다.",
       });
     }
 
-    const mid = process.env.INICIS_MID;
-    const signKey = process.env.INICIS_SIGN_KEY;
+    const mid = "INIpayTest";
+    const signKey = "SU5JTElURV9UUklQTEVERVNfS0VZU1RS";
 
     const oid = `ORD-${reservation.id}-${Date.now()}`;
-
     const timestamp = Date.now().toString();
-
     const price = reservation.total_amount.toString();
-
-    const crypto = require("crypto");
 
     const signature = crypto
       .createHash("sha256")
-      .update(`oid=${oid}&price=${price}&timestamp=${timestamp}${signKey}`)
+      .update(`oid=${oid}&price=${price}&timestamp=${timestamp}`)
+      .digest("hex");
+
+    const verification = crypto
+      .createHash("sha256")
+      .update(
+        `oid=${oid}&price=${price}&signKey=${signKey}&timestamp=${timestamp}`,
+      )
       .digest("hex");
 
     const mKey = crypto.createHash("sha256").update(signKey).digest("hex");
 
-    await pool.query(`UPDATE reservations SET order_id = ? WHERE id = ?`, [
-      oid,
-      reservation.id,
-    ]);
+    await pool.query(
+      "UPDATE reservation_info SET order_id = ?, updated_at = NOW() WHERE id = ?",
+      [oid, reservation.id],
+    );
 
     return res.json({
       ok: true,
@@ -1278,8 +1282,11 @@ app.post("/api/payment/ready", async (req, res) => {
       price,
       timestamp,
       signature,
+      verification,
       mKey,
-      returnUrl: process.env.INICIS_RETURN_URL,
+      returnUrl:
+        process.env.INICIS_RETURN_URL ||
+        "https://localhost:4000/api/payment/return",
     });
   } catch (error) {
     console.error("payment ready error:", error);
