@@ -1171,8 +1171,10 @@ app.post("/api/reservation", async (req, res) => {
 
     const [result] = await pool.query(
       `
-      INSERT INTO reservation_info
+    
+      INSERT INTO reservations_info
       (
+        room_id,
         room_group_id,
         check_in,
         check_out,
@@ -1187,9 +1189,10 @@ app.post("/api/reservation", async (req, res) => {
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, NOW(), NOW())
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
+        1,
         roomInfo.room_group_id,
         check_in,
         check_out,
@@ -1229,7 +1232,7 @@ app.post("/api/payment/ready", async (req, res) => {
     }
 
     const [rows] = await pool.query(
-      "SELECT * FROM reservation_info WHERE id = ?",
+      "SELECT * FROM reservations_info WHERE id = ?",
       [reservationId],
     );
 
@@ -1242,7 +1245,7 @@ app.post("/api/payment/ready", async (req, res) => {
 
     const reservation = rows[0];
 
-    if (reservation.status !== "pending") {
+    if (reservation.status !== "PENDING") {
       return res.status(400).json({
         ok: false,
         message: "이미 처리된 예약입니다.",
@@ -1271,7 +1274,7 @@ app.post("/api/payment/ready", async (req, res) => {
     const mKey = crypto.createHash("sha256").update(signKey).digest("hex");
 
     await pool.query(
-      "UPDATE reservation_info SET order_id = ?, updated_at = NOW() WHERE id = ?",
+      "UPDATE reservations_info SET order_id = ?, updated_at = NOW() WHERE id = ?",
       [oid, reservation.id],
     );
 
