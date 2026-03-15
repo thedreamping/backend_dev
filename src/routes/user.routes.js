@@ -17,6 +17,9 @@ import {
   //  tokenReissue,
   logoutUser,
   login,
+  createAdminUser,
+  listAdminUsers,
+  deleteAdminUser,
 } from "../controllers/user.controller.js";
 
 import verifyToken from "../middlewares/verifyToken.js";
@@ -39,7 +42,8 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 const router = Router();
-
+router.get("/admin", verifyToken, listAdminUsers);
+router.delete("/admin/:id", verifyToken, deleteAdminUser);
 router.get("/", listUsers); // GET    /api/users
 router.get("/:id", getUser); // GET    /api/users/:id
 router.post("/", createUser); // POST   /api/users
@@ -65,5 +69,6 @@ router.post("/login", login);
 router.post("/eul/login", loginUser2);
 //router.post("/token/reissue", verifyToken, tokenReissue);
 router.post("/logout", verifyToken, logoutUser);
+router.post("/admin", verifyToken, createAdminUser);
 
 export default router;

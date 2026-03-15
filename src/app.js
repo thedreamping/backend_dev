@@ -84,7 +84,7 @@ app.use(express.urlencoded({ extended: false })); // 폼 파싱
 
 // 헬스체크
 app.get("/health", (req, res) => {
-  res.json({ ok: true, now: new Date().toISOString(), test: "테스트" });
+  res.json({ ok: true, now: new Date().toISOString(), test: "잘 되었음" });
 });
 app.post("/api/users/token/reissue", tokenReissue);
 

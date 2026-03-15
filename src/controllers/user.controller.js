@@ -863,6 +863,106 @@ export const loginUser2 = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+export const createAdminUser = async (req, res) => {
+  try {
+    const { name, adminId, password } = req.body;
+
+    // 필수값 체크
+    if (!name || !adminId || !password) {
+      return res.status(400).json({
+        message: "name, adminId, password are required",
+      });
+    }
+
+    // 중복 adminId 체크
+    const [existing] = await pool.query(
+      "SELECT id FROM admin_users WHERE adminId = ?",
+      [adminId],
+    );
+
+    if (existing.length > 0) {
+      return res.status(409).json({
+        message: "adminId already exists",
+      });
+    }
+
+    // 비밀번호 암호화
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // DB 저장
+    const [result] = await pool.query(
+      `INSERT INTO admin_users (name, adminId, password)
+       VALUES (?, ?, ?)`,
+      [name, adminId, hashedPassword],
+    );
+
+    // 생성된 관리자 조회
+    const [rows] = await pool.query(
+      `SELECT id, name, adminId, createdAt
+       FROM admin_users
+       WHERE id = ?`,
+      [result.insertId],
+    );
+
+    res.status(201).json({
+      message: "Admin user created",
+      admin: rows[0],
+    });
+  } catch (err) {
+    console.error("createAdminUser error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+export const deleteAdminUser = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        message: "Invalid admin id",
+      });
+    }
+
+    const [result] = await pool.query("DELETE FROM admin_users WHERE id = ?", [
+      id,
+    ]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        message: "Admin user not found",
+      });
+    }
+
+    res.json({
+      message: "Admin user deleted",
+      id: id,
+    });
+  } catch (err) {
+    console.error("deleteAdminUser error:", err);
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+export const listAdminUsers = async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, name, adminId, createdAt
+      FROM admin_users
+      ORDER BY id DESC
+    `);
+
+    res.json({
+      total: rows.length,
+      items: rows,
+    });
+  } catch (err) {
+    console.error("listAdminUsers error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const tokenReissue = async (req, res) => {
   try {
     const { refreshToken } = req.body;
