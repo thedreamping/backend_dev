@@ -1301,6 +1301,118 @@ app.post("/api/payment/ready", async (req, res) => {
   }
 });
 
+app.post("/api/dk_schedule", verifyToken, async (req, res) => {
+  try {
+    const { days, schedule_name, schedule_contents, color } = req.body;
+
+    // 필수값 체크
+    if (!days || !Array.isArray(days) || days.length === 0 || !schedule_name) {
+      return res.status(400).json({
+        ok: false,
+        message: "days 배열과 schedule_name은 필수입니다.",
+      });
+    }
+
+    const [result] = await pool.query(
+      `
+      INSERT INTO dk_schedules
+      (days, schedule_name, schedule_contents, color, created_at)
+      VALUES (?, ?, ?, ?, NOW())
+      `,
+      [
+        JSON.stringify(days),
+        schedule_name.trim(),
+        schedule_contents ? schedule_contents.trim() : null,
+        color,
+      ],
+    );
+
+    return res.json({
+      ok: true,
+      message: "스케줄 생성 완료",
+      id: result.insertId,
+    });
+  } catch (error) {
+    console.error("dk_schedule create error:", error);
+
+    return res.status(500).json({
+      ok: false,
+      message: "스케줄 생성 중 오류 발생",
+    });
+  }
+});
+app.get("/api/dk_schedule", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, days, schedule_name, schedule_contents, color, created_at
+      FROM dk_schedules
+      ORDER BY id DESC
+    `);
+
+    const data = rows.map((row) => ({
+      ...row,
+      days: typeof row.days === "string" ? JSON.parse(row.days) : row.days,
+    }));
+
+    return res.json({
+      ok: true,
+      data,
+    });
+  } catch (error) {
+    console.error("dk_schedule fetch error:", error);
+
+    return res.status(500).json({
+      ok: false,
+      message: "스케줄 조회 중 오류 발생",
+    });
+  }
+});
+app.put("/api/dk_schedule/remove-day", async (req, res) => {
+  try {
+    const { schedule_id, year, month, day } = req.body;
+
+    const [rows] = await pool.query("SELECT * FROM dk_schedules WHERE id = ?", [
+      schedule_id,
+    ]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        result: "fail",
+        message: "schedule not found",
+      });
+    }
+
+    const schedule = rows[0];
+
+    let days = [];
+
+    if (schedule.days) {
+      days =
+        typeof schedule.days === "string"
+          ? JSON.parse(schedule.days)
+          : schedule.days;
+    }
+
+    const newDays = days.filter(
+      (d) => !(d.year === year && d.month === month && d.day === day),
+    );
+
+    await pool.query("UPDATE dk_schedules SET days = ? WHERE id = ?", [
+      JSON.stringify(newDays),
+      schedule_id,
+    ]);
+
+    res.json({
+      result: "success",
+    });
+  } catch (err) {
+    console.error("remove schedule day error:", err);
+    res.status(500).json({
+      result: "fail",
+    });
+  }
+});
+
 // 예시 라우트(원하시는 테이블 라우터로 교체/추가)
 app.use("/api/users", usersRouter);
 
