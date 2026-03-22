@@ -812,7 +812,7 @@ export const login = async (req, res) => {
       message: "로그인 성공!",
       accessToken,
       refreshToken,
-      user: { admin_id: user.adminId },
+      user: { admin_id: user.adminId, adming_name: user.name },
     });
   } catch (err) {
     console.error(err);
