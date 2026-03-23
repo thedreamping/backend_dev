@@ -798,6 +798,78 @@ app.post("/api/main-dining-banner", upload.array("file"), async (req, res) => {
   }
 });
 
+app.post("/api/main-event-popup", upload.array("file"), async (req, res) => {
+  try {
+    const files = req.files || [];
+
+    // multer + formData 특성상
+    const normalizeToArray = (value) => {
+      if (!value) return [];
+      return Array.isArray(value) ? value : [value];
+    };
+
+    const file_name = normalizeToArray(req.body.file_name);
+    const width = normalizeToArray(req.body.width);
+    const height = normalizeToArray(req.body.height);
+    const link = normalizeToArray(req.body.link);
+    const file_url = normalizeToArray(req.body.file_url);
+    const file_index = normalizeToArray(req.body.file_index); // 새 파일의 슬라이드 index
+
+    // 필수값 체크
+    if (
+      !width.length ||
+      width.length !== link.length ||
+      height.length !== width.length
+    ) {
+      return res.status(400).json({ message: "데이터 형식 오류" });
+    }
+
+    // 🔥 기존 데이터 전체 삭제
+    await pool.query("DELETE FROM main_popup");
+
+    // 새 파일과 슬라이드를 index로 매칭
+    const fileMap = {}; // index: fileUrl
+    files.forEach((file, idx) => {
+      const index = parseInt(file_index[idx], 10);
+      if (!isNaN(index)) {
+        fileMap[index] = `/uploads/${file.filename}`;
+      }
+    });
+
+    for (let i = 0; i < width.length; i++) {
+      let finalFileUrl;
+
+      // 새 파일이 있으면 해당 index에서 가져오기
+      if (fileMap[i]) {
+        finalFileUrl = fileMap[i];
+      }
+      // 새 파일 없으면 기존 파일 유지
+      else if (file_url[i]) {
+        finalFileUrl = file_url[i];
+      }
+      // 둘 다 없으면 에러
+      else {
+        return res.status(400).json({
+          message: `이미지 파일이 누락되었습니다. index: ${i}`,
+        });
+      }
+
+      await pool.query(
+        `
+        INSERT INTO main_popup (file_name, width, link, file_url, height)
+        VALUES (?, ?, ?, ?, ?)
+        `,
+        [file_name[i] || "", width[i], link[i], finalFileUrl, height[i]],
+      );
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("main-popup save error:", err);
+    return res.status(500).json({ message: "서버 오류" });
+  }
+});
+
 app.get("/api/get-main-banner", async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -903,6 +975,23 @@ app.get("/api/get-main-dining-banner", async (req, res) => {
     });
   } catch (err) {
     console.error("main-dining-banner fetch error:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "메인 룸 배너 조회 중 오류 발생",
+    });
+  }
+});
+
+app.get("/api/get-main-event-popup", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT * FROM main_popup ORDER BY id ASC`);
+
+    return res.json({
+      ok: true,
+      data: rows,
+    });
+  } catch (err) {
+    console.error("main_popup fetch error:", err);
     return res.status(500).json({
       ok: false,
       message: "메인 룸 배너 조회 중 오류 발생",
