@@ -804,7 +804,7 @@ app.post("/api/main-event-popup", upload.array("file"), async (req, res) => {
 
     // multer + formData 특성상
     const normalizeToArray = (value) => {
-      if (!value) return [];
+      if (value === undefined || value === null) return [];
       return Array.isArray(value) ? value : [value];
     };
 
@@ -813,13 +813,15 @@ app.post("/api/main-event-popup", upload.array("file"), async (req, res) => {
     const height = normalizeToArray(req.body.height);
     const link = normalizeToArray(req.body.link);
     const file_url = normalizeToArray(req.body.file_url);
+    const is_use = normalizeToArray(req.body.is_use);
     const file_index = normalizeToArray(req.body.file_index); // 새 파일의 슬라이드 index
 
     // 필수값 체크
     if (
       !width.length ||
       width.length !== link.length ||
-      height.length !== width.length
+      height.length !== width.length ||
+      height.length !== is_use.length
     ) {
       return res.status(400).json({ message: "데이터 형식 오류" });
     }
@@ -844,7 +846,7 @@ app.post("/api/main-event-popup", upload.array("file"), async (req, res) => {
         finalFileUrl = fileMap[i];
       }
       // 새 파일 없으면 기존 파일 유지
-      else if (file_url[i]) {
+      else if (file_url[i] !== undefined && file_url[i] !== "") {
         finalFileUrl = file_url[i];
       }
       // 둘 다 없으면 에러
@@ -856,10 +858,17 @@ app.post("/api/main-event-popup", upload.array("file"), async (req, res) => {
 
       await pool.query(
         `
-        INSERT INTO main_popup (file_name, width, link, file_url, height)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO main_popup (file_name, width, link, file_url, height, is_use)
+        VALUES (?, ?, ?, ?, ?, ?)
         `,
-        [file_name[i] || "", width[i], link[i], finalFileUrl, height[i]],
+        [
+          file_name[i] || "",
+          width[i],
+          link[i],
+          finalFileUrl,
+          height[i],
+          is_use[i],
+        ],
       );
     }
 
