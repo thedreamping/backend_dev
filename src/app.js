@@ -9,6 +9,8 @@ import verifyToken from "./middlewares/verifyToken.js";
 import pool from "./db.js";
 import multer from "multer";
 import path from "path";
+import axios from "axios";
+
 const app = express();
 
 const storage = multer.diskStorage({
@@ -1635,15 +1637,15 @@ app.post("/api/payment/ready", async (req, res) => {
 
     const reservation = rows[0];
 
-    if (reservation.status !== "PENDING") {
+    if (reservation.status !== "pending") {
       return res.status(400).json({
         ok: false,
         message: "이미 처리된 예약입니다.",
       });
     }
 
-    const mid = "INIpayTest";
-    const signKey = "SU5JTElURV9UUklQTEVERVNfS0VZU1RS";
+    const mid = "cafe246818";
+    const signKey = process.env.INICIS_SIGN_KEY;
 
     const oid = `ORD-${reservation.id}-${Date.now()}`;
     const timestamp = Date.now().toString();
@@ -1687,6 +1689,97 @@ app.post("/api/payment/ready", async (req, res) => {
     return res.status(500).json({
       ok: false,
       message: "결제 준비 중 오류 발생",
+    });
+  }
+});
+
+app.post("/api/payment/return", async (req, res) => {
+  try {
+    const { authToken, authUrl } = req.body;
+
+    if (!authToken || !authUrl) {
+      return res.status(400).json({
+        ok: false,
+        message: "결제 인증 데이터 없음",
+      });
+    }
+
+    const mid = "cafe246818";
+
+    // 🔥 1. 이니시스 서버에 검증 요청
+    const response = await axios.post(authUrl, {
+      authToken,
+      mid,
+    });
+
+    const data = response.data;
+
+    console.log("이니시스 검증 응답:", data);
+
+    // 🔴 2. 결제 실패 처리
+    if (data.resultCode !== "0000") {
+      return res.status(400).json({
+        ok: false,
+        message: "결제 실패",
+        data,
+      });
+    }
+
+    // 🔥 3. order_id 기준으로 DB 조회
+    const [rows] = await pool.query(
+      "SELECT * FROM reservations_info WHERE order_id = ?",
+      [data.oid],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "예약 정보 없음",
+      });
+    }
+
+    const reservation = rows[0];
+
+    // 🔥 4. 금액 검증 (매우 중요)
+    if (Number(reservation.total_amount) !== Number(data.totPrice)) {
+      return res.status(400).json({
+        ok: false,
+        message: "금액 불일치 (위험 거래)",
+      });
+    }
+
+    // 🔥 5. 이미 처리된 건 방지 (중복 결제 방지)
+    if (reservation.status === "paid") {
+      return res.json({
+        ok: true,
+        message: "이미 처리된 결제",
+      });
+    }
+
+    // ✅ 6. 결제 성공 처리
+    await pool.query(
+      `
+      UPDATE reservations_info
+      SET 
+        status = 'paid',
+        tid = ?,
+        paid_at = NOW(),
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [data.tid, reservation.id],
+    );
+
+    return res.json({
+      ok: true,
+      message: "결제 성공",
+    });
+  } catch (error) {
+    console.error("payment return error:", error);
+
+    return res.status(500).json({
+      ok: false,
+      message: "결제 검증 중 오류",
     });
   }
 });
