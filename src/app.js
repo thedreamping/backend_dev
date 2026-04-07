@@ -1009,12 +1009,11 @@ app.get("/api/get-main-event-popup", async (req, res) => {
     });
   }
 });
-
 app.post("/api/room-price", verifyToken, async (req, res) => {
   try {
     const { dates, rooms } = req.body;
 
-    if (!dates || !rooms || !Array.isArray(dates) || !Array.isArray(rooms)) {
+    if (!Array.isArray(dates) || !Array.isArray(rooms)) {
       return res.status(400).json({
         ok: false,
         message: "잘못된 요청 형식입니다.",
@@ -1046,30 +1045,52 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
       });
     }
 
-    await pool.query(
-      `
-      INSERT INTO room_price 
-      (room_group_id, date, price, room_group_name)
-      VALUES ?
-      ON DUPLICATE KEY UPDATE
-        price = VALUES(price),
-        room_group_name = VALUES(room_group_name)
-      `,
-      [insertValues],
-    );
+    const conn = await pool.getConnection();
+    await conn.beginTransaction();
 
-    return res.json({
-      ok: true,
-      message: "객실 가격 저장(덮어쓰기) 완료",
-    });
+    try {
+      // 🔥 날짜 기준 전체 삭제
+      const placeholders = dates.map(() => "?").join(",");
+
+      await conn.query(
+        `DELETE FROM room_price WHERE date IN (${placeholders})`,
+        dates
+      );
+
+      // 🔥 새로 INSERT
+      await conn.query(
+        `
+        INSERT INTO room_price 
+        (room_group_id, date, price, room_group_name)
+        VALUES ?
+        `,
+        [insertValues]
+      );
+
+      await conn.commit();
+
+      return res.json({
+        ok: true,
+        message: "날짜 기준 전체 덮어쓰기 완료",
+      });
+
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+
   } catch (error) {
-    console.error("room_price upsert error:", error);
+    console.error("room_price replace error:", error);
     return res.status(500).json({
       ok: false,
       message: "객실 가격 저장 중 오류 발생",
     });
   }
 });
+
+
 app.get("/api/room-price", async (req, res) => {
   try {
     let { year, month, roomId } = req.query;
