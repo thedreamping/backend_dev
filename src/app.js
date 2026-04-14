@@ -227,6 +227,70 @@ app.put("/api/options/:id", verifyToken, async (req, res) => {
   }
 });
 
+const formatDate = (isoString) => {
+  if (!isoString) return null;
+  return isoString.split("T")[0]; // YYYY-MM-DD
+};
+
+app.post("/api/options_all_change", verifyToken, async (req, res) => {
+  try {
+    const { options } = req.body;
+
+    if (!Array.isArray(options) || options.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "options 배열이 필요합니다.",
+      });
+    }
+
+    const conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    try {
+      // 🔥 기존 데이터 전부 삭제
+      await conn.query(`DELETE FROM options`);
+
+      // 🔥 새로 insert
+      for (const item of options) {
+        await conn.query(
+          `
+          INSERT INTO options
+          (name, price, start_date, end_date, start_date_able, end_date_able, is_use)
+          VALUES (?, ?, ?, ?, ?, ?, 1)
+          `,
+          [
+            item.name,
+            Number(item.price),
+            formatDate(item.start_date),
+            formatDate(item.end_date),
+            formatDate(item.start_date_able),
+            formatDate(item.end_date_able),
+          ],
+        );
+      }
+
+      await conn.commit();
+      conn.release();
+
+      return res.json({
+        ok: true,
+        message: "전체 재정렬 완료",
+      });
+    } catch (err) {
+      await conn.rollback();
+      conn.release();
+      throw err;
+    }
+  } catch (error) {
+    console.error("options_all_change error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "순서 변경 중 오류 발생",
+    });
+  }
+});
+
+
 app.post("/api/options", verifyToken, async (req, res) => {
   try {
     const {
@@ -1914,6 +1978,38 @@ app.put("/api/dk_schedule/remove-day", async (req, res) => {
     res.status(500).json({
       result: "fail",
     });
+  }
+});
+
+app.post("/api/logs", verifyToken, async (req, res) => {
+  try {
+    const { admin_name, method, endpoint, status_code } = req.body;
+
+    if (!admin_name || !method || !endpoint) {
+      return res.status(400).json({
+        ok: false,
+        message: "필수값 누락",
+      });
+    }
+
+    const ip =
+      req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+
+
+
+    await pool.query(
+      `
+      INSERT INTO admin_logs
+      (admin_name, method, endpoint, status_code, ip)
+      VALUES (?, ?, ?, ?, ?)
+      `,
+      [admin_name, method, endpoint, status_code || null, ip],
+    );
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("log error:", error);
+    return res.status(500).json({ ok: false });
   }
 });
 
