@@ -1215,13 +1215,20 @@ app.get("/api/room-price", async (req, res) => {
     });
   }
 });
-
 app.put("/api/room/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { name, is_active, reason, capacity_max, capacity_min, day_use } =
-      req.body;
+    const {
+      name,
+      is_active,
+      reason,
+      capacity_max,
+      capacity_min,
+      day_use,
+      disable_start,
+      disable_end,
+    } = req.body;
 
     // ✅ 필수값 체크
     if (
@@ -1256,21 +1263,40 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       });
     }
 
-    // 🔥 비활성화 시 사유 필수
-    if (Number(is_active) === 0 && (!reason || reason.trim() === "")) {
-      return res.status(400).json({
-        ok: false,
-        message: "비활성화 시 사유는 필수입니다.",
-      });
+    // 🔥 비활성화 시 사유 + 날짜 필수
+    if (Number(is_active) === 0) {
+      if (!reason || reason.trim() === "") {
+        return res.status(400).json({
+          ok: false,
+          message: "비활성화 시 사유는 필수입니다.",
+        });
+      }
+
+      if (!disable_start || !disable_end) {
+        return res.status(400).json({
+          ok: false,
+          message: "비활성 기간은 필수입니다.",
+        });
+      }
+
+      if (disable_start > disable_end) {
+        return res.status(400).json({
+          ok: false,
+          message: "시작일은 종료일보다 클 수 없습니다.",
+        });
+      }
     }
 
     const finalReason = Number(is_active) === 1 ? null : reason.trim();
+    const finalStart = Number(is_active) === 1 ? null : disable_start;
+    const finalEnd = Number(is_active) === 1 ? null : disable_end;
+
     const lodgement = numericDayUse === 1 ? 0 : 1;
 
     // ✅ 1️⃣ 해당 room의 group id 조회
     const [roomRows] = await pool.query(
       `SELECT room_group_id FROM room WHERE id = ?`,
-      [id],
+      [id]
     );
 
     if (roomRows.length === 0) {
@@ -1292,25 +1318,35 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           lodgement = ?
       WHERE room_group_id = ?
       `,
-      [numericMax, numericMin, numericDayUse, lodgement, roomGroupId],
+      [numericMax, numericMin, numericDayUse, lodgement, roomGroupId]
     );
 
-    // ✅ 3️⃣ 해당 id 하나만 name/is_active/reason 수정
+    // ✅ 3️⃣ 해당 id 하나만 상세 수정 (🔥 날짜 추가)
     const [result] = await pool.query(
       `
       UPDATE room
       SET name = ?,
           is_active = ?,
-          reason = ?
+          reason = ?,
+          disable_start = ?,
+          disable_end = ?
       WHERE id = ?
       `,
-      [name.trim(), Number(is_active), finalReason, id],
+      [
+        name.trim(),
+        Number(is_active),
+        finalReason,
+        finalStart,
+        finalEnd,
+        id,
+      ]
     );
 
     return res.json({
       ok: true,
       message: "객실 정보 수정 완료",
     });
+
   } catch (error) {
     console.error("room update error:", error);
     return res.status(500).json({
@@ -1320,6 +1356,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
   }
 });
 
+
 app.put("/api/room-group/:id", verifyToken, async (req, res) => {
   const connection = await pool.getConnection();
 
@@ -1327,8 +1364,15 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
     await connection.beginTransaction();
 
     const { id } = req.params;
-    const { name, is_active, reason } = req.body;
+    const {
+      name,
+      is_active,
+      reason,
+      disable_start,
+      disable_end,
+    } = req.body;
 
+    // ✅ 필수값 체크
     if (!name || typeof is_active === "undefined") {
       await connection.rollback();
       return res.status(400).json({
@@ -1337,24 +1381,62 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
       });
     }
 
-    if (Number(is_active) === 0 && (!reason || reason.trim() === "")) {
-      await connection.rollback();
-      return res.status(400).json({
-        ok: false,
-        message: "비활성화 시 사유는 필수입니다.",
-      });
+    // ✅ 비활성화 조건
+    if (Number(is_active) === 0) {
+      if (!reason || reason.trim() === "") {
+        await connection.rollback();
+        return res.status(400).json({
+          ok: false,
+          message: "비활성화 시 사유는 필수입니다.",
+        });
+      }
+
+      if (!disable_start || !disable_end) {
+        await connection.rollback();
+        return res.status(400).json({
+          ok: false,
+          message: "비활성 기간은 필수입니다.",
+        });
+      }
+
+      if (disable_start > disable_end) {
+        await connection.rollback();
+        return res.status(400).json({
+          ok: false,
+          message: "시작일은 종료일보다 클 수 없습니다.",
+        });
+      }
     }
 
-    const finalReason = Number(is_active) === 1 ? null : reason.trim();
+    const finalReason =
+      Number(is_active) === 1 ? null : reason.trim();
+
+    const finalStart =
+      Number(is_active) === 1 ? null : disable_start;
+
+    const finalEnd =
+      Number(is_active) === 1 ? null : disable_end;
 
     // 1️⃣ 그룹 업데이트
     const [result] = await connection.query(
       `
       UPDATE room_group
-      SET name = ?, is_active = ?, reason = ?
+      SET 
+        name = ?, 
+        is_active = ?, 
+        reason = ?,
+        disable_start = ?,
+        disable_end = ?
       WHERE id = ?
       `,
-      [name, Number(is_active), finalReason, id],
+      [
+        name,
+        Number(is_active),
+        finalReason,
+        finalStart,
+        finalEnd,
+        id,
+      ]
     );
 
     if (result.affectedRows === 0) {
@@ -1365,29 +1447,37 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
       });
     }
 
-    // 2️⃣ 그룹이 비활성화면 하위 room도 비활성화
+    // 2️⃣ 하위 room 동기화
+
     if (Number(is_active) === 0) {
+      // 🔥 비활성화
       await connection.query(
         `
         UPDATE room
-        SET is_active = 0,
-            reason = '상위 그룹 비활성화'
+        SET 
+          is_active = 0,
+          reason = '상위 그룹 비활성화',
+          disable_start = ?,
+          disable_end = ?
         WHERE room_group_id = ?
         `,
-        [id],
+        [finalStart, finalEnd, id]
       );
     }
 
-    // 3️⃣ 그룹이 활성화면 하위 room도 활성화 + reason NULL
     if (Number(is_active) === 1) {
+      // 🔥 활성화
       await connection.query(
         `
         UPDATE room
-        SET is_active = 1,
-            reason = NULL
+        SET 
+          is_active = 1,
+          reason = NULL,
+          disable_start = NULL,
+          disable_end = NULL
         WHERE room_group_id = ?
         `,
-        [id],
+        [id]
       );
     }
 
@@ -1397,12 +1487,114 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
       ok: true,
       message: "객실 그룹 수정 완료",
     });
+
   } catch (error) {
     await connection.rollback();
     console.error("room_group update error:", error);
     return res.status(500).json({
       ok: false,
       message: "객실 그룹 수정 중 오류 발생",
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+app.put("/api/rooms/bulk-update", verifyToken, async (req, res) => {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const {
+      ids,
+      is_active,
+      reason,
+      disable_start,
+      disable_end,
+    } = req.body;
+
+    // 🔹 기본 검증
+    if (!Array.isArray(ids) || ids.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        ok: false,
+        message: "ids 배열이 필요합니다.",
+      });
+    }
+
+    if (typeof is_active === "undefined") {
+      await connection.rollback();
+      return res.status(400).json({
+        ok: false,
+        message: "is_active는 필수입니다.",
+      });
+    }
+
+    // 🔹 비활성화 시 조건
+    if (Number(is_active) === 0) {
+      if (!reason || reason.trim() === "") {
+        await connection.rollback();
+        return res.status(400).json({
+          ok: false,
+          message: "비활성화 시 사유는 필수입니다.",
+        });
+      }
+
+      if (!disable_start || !disable_end) {
+        await connection.rollback();
+        return res.status(400).json({
+          ok: false,
+          message: "비활성 기간은 필수입니다.",
+        });
+      }
+    }
+
+    const finalReason =
+      Number(is_active) === 1 ? null : reason.trim();
+
+    const finalStart =
+      Number(is_active) === 1 ? null : disable_start;
+
+    const finalEnd =
+      Number(is_active) === 1 ? null : disable_end;
+
+    // 🔹 IN 절용 placeholder 생성
+    const placeholders = ids.map(() => "?").join(",");
+
+    // 🔥 핵심 쿼리
+    const [result] = await connection.query(
+      `
+      UPDATE room
+      SET 
+        is_active = ?,
+        reason = ?,
+        disable_start = ?,
+        disable_end = ?
+      WHERE id IN (${placeholders})
+      `,
+      [
+        Number(is_active),
+        finalReason,
+        finalStart,
+        finalEnd,
+        ...ids,
+      ]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      ok: true,
+      message: `${result.affectedRows}개 객실 수정 완료`,
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error("bulk room update error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "객실 일괄 수정 중 오류 발생",
     });
   } finally {
     connection.release();
@@ -2009,6 +2201,51 @@ app.post("/api/logs", verifyToken, async (req, res) => {
     return res.json({ ok: true });
   } catch (error) {
     console.error("log error:", error);
+    return res.status(500).json({ ok: false });
+  }
+});
+
+app.get("/api/logs", verifyToken, async (req, res) => {
+  try {
+    let { page = 1, limit = 10 } = req.query;
+
+    page = parseInt(page);
+    limit = parseInt(limit);
+
+    const offset = (page - 1) * limit;
+
+    // 🔹 전체 개수
+    const [countRows] = await pool.query(`
+      SELECT COUNT(*) as total
+      FROM admin_logs
+    `);
+
+    const total = countRows[0].total;
+
+    // 🔹 페이지별 데이터
+    const [rows] = await pool.query(
+      `
+      SELECT *
+      FROM admin_logs
+      ORDER BY id DESC
+      LIMIT ? OFFSET ?
+      `,
+      [limit, offset]
+    );
+
+    return res.json({
+      ok: true,
+      data: rows,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+
+  } catch (error) {
+    console.error("log get error:", error);
     return res.status(500).json({ ok: false });
   }
 });

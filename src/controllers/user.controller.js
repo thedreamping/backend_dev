@@ -892,9 +892,9 @@ export const createAdminUser = async (req, res) => {
 
     // DB 저장
     const [result] = await pool.query(
-      `INSERT INTO admin_users (name, adminId, password)
-       VALUES (?, ?, ?)`,
-      [name, adminId, hashedPassword],
+      `INSERT INTO admin_users (name, adminId, password, hyper)
+       VALUES (?, ?, ?, ?)`,
+      [name, adminId, hashedPassword, 0],
     );
 
     // 생성된 관리자 조회
@@ -948,7 +948,7 @@ export const deleteAdminUser = async (req, res) => {
 export const listAdminUsers = async (req, res) => {
   try {
     const [rows] = await pool.query(`
-      SELECT id, name, adminId, createdAt
+      SELECT id, name, adminId, hyper, createdAt
       FROM admin_users
       ORDER BY id DESC
     `);
