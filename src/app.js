@@ -2250,6 +2250,82 @@ app.get("/api/logs", verifyToken, async (req, res) => {
   }
 });
 
+
+app.post("/api/naver-status", async (req, res) => {
+  try {
+    const { action } = req.body;
+
+    // 🔎 필수값 체크
+    if (!action) {
+      return res.status(400).json({
+        ok: false,
+        message: "action 값은 필수입니다.",
+      });
+    }
+
+    // 🔎 허용 값 체크
+    const allowed = ["green", "orange", "red"];
+    if (!allowed.includes(action)) {
+      return res.status(400).json({
+        ok: false,
+        message: "action 값은 green, orange, red 중 하나여야 합니다.",
+      });
+    }
+
+    // 🔥 DB insert
+    await pool.query(
+      `
+      INSERT INTO naver_sync_log (action)
+      VALUES (?)
+      `,
+      [action]
+    );
+
+    return res.json({
+      ok: true,
+      message: "상태 저장 완료",
+    });
+  } catch (error) {
+    console.error("naver-status error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "상태 저장 중 오류 발생",
+    });
+  }
+});
+
+app.get("/api/naver-status", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, action, created_at
+      FROM naver_sync_log
+      ORDER BY id DESC
+      LIMIT 1
+    `);
+
+    // 🔎 데이터 없을 경우
+    if (rows.length === 0) {
+      return res.json({
+        ok: true,
+        data: null,
+        message: "아직 상태 로그 없음",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      data: rows[0],
+    });
+
+  } catch (error) {
+    console.error("naver-status get error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "상태 조회 중 오류 발생",
+    });
+  }
+});
+
 // 예시 라우트(원하시는 테이블 라우터로 교체/추가)
 app.use("/api/users", usersRouter);
 
