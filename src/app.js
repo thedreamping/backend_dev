@@ -2326,6 +2326,7 @@ app.get("/api/naver-status", async (req, res) => {
   }
 });
 
+
 const syncNaverBookingsToRooms = async () => {
   const conn = await pool.getConnection();
 
@@ -2337,7 +2338,7 @@ const syncNaverBookingsToRooms = async () => {
     console.log("🟡 [SYNC] 시작", new Date().toISOString());
 
     // =====================================================
-    // 0️⃣ disable_end 지난 방들 정리
+    // 0️⃣ disable 종료된 방 정리
     // =====================================================
     await conn.query(`
       UPDATE room
@@ -2353,7 +2354,7 @@ const syncNaverBookingsToRooms = async () => {
     `, [today]);
 
     // =====================================================
-    // 1️⃣ 현재 OTA 상태 초기화 (전체 reset)
+    // 1️⃣ OTA 전체 초기화
     // =====================================================
     await conn.query(`
       UPDATE room
@@ -2363,25 +2364,25 @@ const syncNaverBookingsToRooms = async () => {
         disable_end = NULL,
         check_in = NULL,
         check_out = NULL
-      WHERE is_ota = 1
     `);
 
     // =====================================================
-    // 2️⃣ room_group 가져오기
+    // 2️⃣ room_group 조회
     // =====================================================
     const [groups] = await conn.query(`
       SELECT id, name FROM room_group WHERE is_active = 1
     `);
 
-    // 특수문자 제거 함수
     const normalize = (str) =>
       str.replace(/[^가-힣a-zA-Z0-9]/g, "").toLowerCase();
 
     // =====================================================
-    // 3️⃣ naver_bookings 가져오기
+    // 3️⃣ booking 조회 (취소 제외)
     // =====================================================
     const [bookings] = await conn.query(`
       SELECT * FROM naver_bookings
+      WHERE cancel_date2 IS NULL
+      ORDER BY created_at ASC
     `);
 
     for (const booking of bookings) {
@@ -2389,13 +2390,13 @@ const syncNaverBookingsToRooms = async () => {
         product_name,
         check_in,
         check_out,
-        cancel_date2,
+        created_at,
       } = booking;
 
       const normalizedProduct = normalize(product_name);
 
       // =====================================================
-      // 3-1️⃣ room_group 매칭
+      // 3-1️⃣ group 매칭
       // =====================================================
       const matchedGroup = groups.find((g) =>
         normalizedProduct.includes(normalize(g.name))
@@ -2404,16 +2405,13 @@ const syncNaverBookingsToRooms = async () => {
       if (!matchedGroup) continue;
 
       // =====================================================
-      // 3-2️⃣ 날짜 계산
+      // 3-2️⃣ disable 기간 (핵심)
       // =====================================================
-      const disableStart = check_in;
+      const disableStart = created_at.slice(0, 10);
       const disableEnd = check_out;
 
-      // cancel이면 skip
-      if (cancel_date2) continue;
-
       // =====================================================
-      // 3-3️⃣ 해당 group의 room 조회
+      // 3-3️⃣ room 조회
       // =====================================================
       const [rooms] = await conn.query(`
         SELECT * FROM room
@@ -2424,7 +2422,7 @@ const syncNaverBookingsToRooms = async () => {
       if (!rooms.length) continue;
 
       // =====================================================
-      // 3-4️⃣ 사용할 room 선택 (중복 방지)
+      // 3-4️⃣ 사용할 room 선택 (중복 방지 핵심)
       // =====================================================
       let targetRoom = null;
 
@@ -2443,18 +2441,13 @@ const syncNaverBookingsToRooms = async () => {
       let is_active = 0;
       let available = 1;
 
+      // 숙박중
       if (today >= check_in && today < check_out) {
-        // 숙박중
-        is_active = 0;
         available = 0;
-      } else {
-        // 예약만 있음
-        is_active = 0;
-        available = 1;
       }
 
       // =====================================================
-      // 3-6️⃣ 업데이트
+      // 3-6️⃣ 마킹
       // =====================================================
       await conn.query(`
         UPDATE room
