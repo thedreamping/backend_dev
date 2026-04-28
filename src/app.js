@@ -2360,13 +2360,13 @@ const syncNaverBookingsToRooms = async () => {
 
     // 3️⃣ group 매칭
     const groupMap = {};
-
+    console.log(bookings)
     for (const booking of bookings) {
       const productName = normalize(booking.product_name);
 
       for (const group of groups) {
         const groupName = normalize(group.name);
-
+        console.log(productName,groupName)
         if (productName.includes(groupName)) {
           if (!groupMap[group.id]) groupMap[group.id] = [];
           groupMap[group.id].push(booking);
@@ -2386,6 +2386,7 @@ const syncNaverBookingsToRooms = async () => {
     `);
 
     // 5️⃣ room 할당
+    console.log("그룹맵",groupMap)
     for (const groupId in groupMap) {
       const groupBookings = groupMap[groupId];
 
