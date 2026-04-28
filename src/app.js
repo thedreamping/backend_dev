@@ -2253,6 +2253,7 @@ app.get("/api/logs", verifyToken, async (req, res) => {
 
 app.post("/api/naver-status", async (req, res) => {
   try {
+    console.log("this", req.body)
     const { action } = req.body;
 
     // 🔎 필수값 체크
