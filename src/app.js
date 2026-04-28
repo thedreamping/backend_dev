@@ -2326,7 +2326,8 @@ app.get("/api/naver-status", async (req, res) => {
     });
   }
 });
-const syncNaverBookingsToRooms = async () => {
+
+export const syncNaverBookingsToRooms = async () => {
   const conn = await pool.getConnection();
 
   try {
@@ -2335,13 +2336,10 @@ const syncNaverBookingsToRooms = async () => {
     console.log("🟡 [SYNC] 시작", new Date().toISOString());
 
     // =====================================================
-    // 🔴 0️⃣ room_booking 초기화 (핵심)
+    // 0️⃣ 초기화
     // =====================================================
     await conn.query(`DELETE FROM room_booking`);
 
-    // =====================================================
-    // 1️⃣ room 상태 초기화
-    // =====================================================
     await conn.query(`
       UPDATE room
       SET
@@ -2351,118 +2349,165 @@ const syncNaverBookingsToRooms = async () => {
     `);
 
     // =====================================================
-    // 2️⃣ 그룹 조회
+    // 1️⃣ 그룹 조회
     // =====================================================
     const [groups] = await conn.query(`
       SELECT id, name FROM room_group WHERE is_active = 1
     `);
 
     const normalize = (str) =>
-      str.replace(/[^가-힣a-zA-Z0-9]/g, "").toLowerCase();
+      (str || "").replace(/[^가-힣a-zA-Z0-9]/g, "").toLowerCase();
 
     // =====================================================
-    // 3️⃣ 예약 조회 (취소 제외 + 미래만)
+    // 2️⃣ 예약 조회
     // =====================================================
     const [bookings] = await conn.query(`
-      SELECT * FROM naver_bookings
+      SELECT *
+      FROM naver_bookings
       WHERE cancel_date2 IS NULL
-      AND check_out > NOW()
-      ORDER BY created_at ASC
+        AND check_out > NOW()
+      ORDER BY check_in ASC, created_at ASC
     `);
 
     // =====================================================
-    // 4️⃣ room 캐싱
+    // 3️⃣ 그룹핑 (핵심 수정)
+    // =====================================================
+    const groupedBookings = {};
+
+    for (const item of bookings) {
+      const product = normalize(item.product_name);
+
+      const group = groups.find((g) => {
+        const gname = normalize(g.name);
+
+        if (!product || !gname) return false;
+
+       
+
+        return product.includes(gname) || gname.includes(product);
+      });
+
+      if (!group) continue;
+
+      if (!groupedBookings[group.id]) {
+        groupedBookings[group.id] = {
+          group,
+          list: [],
+        };
+      }
+
+      groupedBookings[group.id].list.push(item);
+    }
+    console.log(groupedBookings)
+    // =====================================================
+    // 4️⃣ 그룹별 배정
     // =====================================================
     const roomCache = {};
 
-    const isOverlap = (aStart, aEnd, bStart, bEnd) =>
-      aStart < bEnd && bStart < aEnd;
+    for (const groupId in groupedBookings) {
+      const { group, list } = groupedBookings[groupId];
 
-    // =====================================================
-    // 5️⃣ booking → room_booking 생성
-    // =====================================================
-    for (const booking of bookings) {
-      const { booking_id, product_name, check_in, check_out } = booking;
+      if (!roomCache[groupId]) {
+      const [rooms] = await conn.query(`
+      SELECT * FROM room
+      WHERE room_group_id = ?
+      ORDER BY id ASC
+      `, [groupId]);
 
-      const normalizedProduct = normalize(product_name);
+      
 
-      const matchedGroup = groups.find((g) =>
-        normalizedProduct.includes(normalize(g.name))
-      );
+      roomCache[groupId] = rooms;
+      }  
+      const rooms = roomCache[groupId];
 
-      if (!matchedGroup) continue;
+      console.log("🔥 ROOM LOAD:", groupId, rooms.length, rooms.map(r => r.id));
+      if (!rooms.length) continue;
 
-      // -----------------------------------------------------
-      // room 캐싱
-      // -----------------------------------------------------
-      if (!roomCache[matchedGroup.id]) {
-        const [rooms] = await conn.query(`
-          SELECT * FROM room
-          WHERE room_group_id = ?
-          ORDER BY id ASC
-        `, [matchedGroup.id]);
+      // room별 스케줄
+     
 
-        roomCache[matchedGroup.id] = rooms;
-      }
+      
 
-      const rooms = roomCache[matchedGroup.id];
+      // =====================================================
+      // 5️⃣ 배정 로직
+      // =====================================================
+     const roomSchedules = new Map();
 
-      let assignedRoom = null;
+for (const room of rooms) {
+  roomSchedules.set(room.id, []);
+}
 
-      // -----------------------------------------------------
-      // 방 배정 (겹침 체크)
-      // -----------------------------------------------------
-      for (const r of rooms) {
-        const [conflicts] = await conn.query(`
-          SELECT 1 FROM room_booking
-          WHERE room_id = ?
-          AND check_in < ?
-          AND check_out > ?
-        `, [r.id, check_out, check_in]);
+for (const booking of list) {
+  const bStart = new Date(booking.check_in);
+  const bEnd = new Date(booking.check_out);
+  
+  let assigned = false;
 
-        if (conflicts.length === 0) {
-          assignedRoom = r;
-          break;
-        }
-      }
+  for (const room of rooms) {
+    const schedule = roomSchedules.get(room.id);
 
-      if (!assignedRoom) {
-        console.log("⚠️ 방 부족", matchedGroup.name, check_in, check_out);
-        continue;
-      }
+    if (!schedule) continue; // 🔥 방어 코드
 
-      // -----------------------------------------------------
-      // room_booking 저장
-      // -----------------------------------------------------
+    const conflict = schedule.some(s =>
+      bStart < s.end && s.start < bEnd
+    );
+
+    if (!conflict) {
+      
+      schedule.push({ start: bStart, end: bEnd });
+
       await conn.query(`
         INSERT INTO room_booking
         (room_id, booking_id, check_in, check_out)
         VALUES (?, ?, ?, ?)
-      `, [assignedRoom.id, booking_id, check_in, check_out]);
+      `, [
+        room.id,
+        booking.booking_id,
+        booking.check_in,
+        booking.check_out
+      ]);
+
+      assigned = true;
+      break;
+    }
+  }
+
+  if (!assigned) {
+    console.log("⚠️ 방 부족:", booking.product_name);
+  }
+}
     }
 
     // =====================================================
-    // 6️⃣ room 상태 다시 계산 (표시용)
+    // 6️⃣ room 상태 업데이트
     // =====================================================
     const [activeBookings] = await conn.query(`
-      SELECT * FROM room_booking
+      SELECT *
+      FROM room_booking
       WHERE check_out > NOW()
     `);
-
+    console.log("true booking:",activeBookings.map((a) => a),activeBookings.length)  
     const now = new Date();
 
     for (const b of activeBookings) {
       const isStaying =
         now >= new Date(b.check_in) && now < new Date(b.check_out);
-
+      console.log(isStaying, "what the fuck" , b.check_out)
       await conn.query(`
         UPDATE room
         SET
           is_ota = 1,
           is_active = 0,
-          available = ?
+          available = ?,
+          disable_start = ?,
+          disable_end = ?
         WHERE id = ?
-      `, [isStaying ? 0 : 1, b.room_id]);
+      `, [
+        isStaying ? 0 : 1,
+        now.toISOString().slice(0,10),
+        new Date(b.check_out).toISOString().slice(0,10),
+        b.room_id,
+      ]);
     }
 
     await conn.commit();
