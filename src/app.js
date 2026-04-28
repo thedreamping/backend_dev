@@ -2253,7 +2253,7 @@ app.get("/api/logs", verifyToken, async (req, res) => {
 
 app.post("/api/naver-status", async (req, res) => {
   try {
-    console.log("this", req.body)
+  
     const { action } = req.body;
 
     // 🔎 필수값 체크
@@ -2367,7 +2367,7 @@ const syncNaverBookingsToRooms = async () => {
 
       for (const group of groups) {
         const groupName = normalize(group.name);
-
+     
         if (productName.includes(groupName)) {
           if (!groupMap[group.id]) groupMap[group.id] = [];
           groupMap[group.id].push(booking);
@@ -2387,9 +2387,10 @@ const syncNaverBookingsToRooms = async () => {
     `);
 
     // 5️⃣ room 할당
+   
     for (const groupId in groupMap) {
       const groupBookings = groupMap[groupId];
-
+    
       const [rooms] = await conn.query(`
         SELECT id
         FROM room
@@ -2398,7 +2399,7 @@ const syncNaverBookingsToRooms = async () => {
       `, [groupId]);
 
       const targetRooms = rooms.slice(0, groupBookings.length);
-
+      console.log(targetRooms)
       for (let i = 0; i < targetRooms.length; i++) {
         const room = targetRooms[i];
         const booking = groupBookings[i];
@@ -2415,6 +2416,7 @@ const syncNaverBookingsToRooms = async () => {
 
         if (now >= checkIn && now <= checkOut) {
           // 🔥 숙박 중
+          console.log("this")
           isActive = 0;
           available = 1;
           isOta = 1;
@@ -2423,11 +2425,14 @@ const syncNaverBookingsToRooms = async () => {
           isActive = 1;
           available = 1;
           isOta = 0;
+          
+          console.log("middle")
         } else if (now > checkOut) {
           // 🔥 종료
           isActive = 1;
           available = 1;
           isOta = 0;
+          console.log("end")
         }
 
         await conn.query(`
