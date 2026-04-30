@@ -2326,6 +2326,7 @@ app.get("/api/naver-status", async (req, res) => {
     });
   }
 });
+
 export const syncNaverBookingsToRooms = async () => {
   const conn = await pool.getConnection();
 
@@ -2335,7 +2336,15 @@ export const syncNaverBookingsToRooms = async () => {
     console.log("🟡 [SYNC] 시작", new Date().toISOString());
 
     // =====================================================
-    // 0️⃣ room_group json 초기화
+    // KST 날짜 변환
+    // =====================================================
+    const toKSTDate = (date) =>
+      new Intl.DateTimeFormat("sv-SE", {
+        timeZone: "Asia/Seoul",
+      }).format(new Date(date));
+
+    // =====================================================
+    // 0️⃣ room_group check_in_and_out 전체 초기화
     // =====================================================
     await conn.query(`
       UPDATE room_group
@@ -2381,7 +2390,6 @@ export const syncNaverBookingsToRooms = async () => {
 
       const group = groups.find((g) => {
         const gname = normalize(g.name);
-
         return product.includes(gname) || gname.includes(product);
       });
 
@@ -2391,13 +2399,13 @@ export const syncNaverBookingsToRooms = async () => {
       }
 
       groupedDates[group.id].push({
-        check_in: new Date(booking.check_in).toISOString().slice(0, 10),
-        check_out: new Date(booking.check_out).toISOString().slice(0, 10),
+        check_in: toKSTDate(booking.check_in),
+        check_out: toKSTDate(booking.check_out),
       });
     }
 
     // =====================================================
-    // 4️⃣ room_group json 저장
+    // 4️⃣ room_group 저장
     // =====================================================
     for (const groupId in groupedDates) {
       await conn.query(`
@@ -2410,9 +2418,7 @@ export const syncNaverBookingsToRooms = async () => {
       ]);
 
       console.log(
-        `🟢 group ${groupId}:`,
-        groupedDates[groupId].length,
-        "건 저장"
+        `🟢 group ${groupId}: ${groupedDates[groupId].length}건 저장`
       );
     }
 
