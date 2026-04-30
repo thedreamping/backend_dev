@@ -2540,6 +2540,25 @@ setInterval(async () => {
 syncNaverBookingsToRooms();
 
 
+app.get("/api/for_debuging", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT * FROM naver_bookings ORDER BY id ASC`);
+    const [rows2] = await pool.query(`SELECT * FROM room_booking ORDER BY id ASC`);
+
+    return res.json({
+      ok: true,
+      naver_data: rows,
+      our_data: rows2,
+    });
+  } catch (e) {
+    console.error("room_group fetch error:", e);
+    res.status(500).json({
+      ok: false,
+      message: "room_group 조회 중 오류 발생",
+    });
+  }
+});
+
 // 예시 라우트(원하시는 테이블 라우터로 교체/추가)
 app.use("/api/users", usersRouter);
 
