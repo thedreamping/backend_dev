@@ -2449,7 +2449,7 @@ syncNaverBookingsToRooms();
 app.get("/api/for_debuging", async (req, res) => {
   try {
     const [rows] = await pool.query(`SELECT * FROM naver_bookings ORDER BY id ASC`);
-    const [rows2] = await pool.query(`SELECT * FROM room_booking ORDER BY id ASC`);
+    const [rows2] = await pool.query(`SELECT * FROM room_group ORDER BY id ASC`);
 
     return res.json({
       ok: true,
