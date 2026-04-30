@@ -2326,7 +2326,6 @@ app.get("/api/naver-status", async (req, res) => {
     });
   }
 });
-
 export const syncNaverBookingsToRooms = async () => {
   const conn = await pool.getConnection();
 
@@ -2336,33 +2335,32 @@ export const syncNaverBookingsToRooms = async () => {
     console.log("🟡 [SYNC] 시작", new Date().toISOString());
 
     // =====================================================
-    // 0️⃣ 초기화
+    // 0️⃣ room_group json 초기화
     // =====================================================
-    await conn.query(`DELETE FROM room_booking`);
-
     await conn.query(`
-      UPDATE room
-      SET
-        is_ota = 0,
-        is_active = 1,
-        available = 1
+      UPDATE room_group
+      SET check_in_and_out = JSON_ARRAY()
     `);
 
     // =====================================================
     // 1️⃣ 그룹 조회
     // =====================================================
     const [groups] = await conn.query(`
-      SELECT id, name FROM room_group WHERE is_active = 1
+      SELECT id, name
+      FROM room_group
+      WHERE is_active = 1
     `);
 
     const normalize = (str) =>
-      (str || "").replace(/[^가-힣a-zA-Z0-9]/g, "").toLowerCase();
+      (str || "")
+        .replace(/[^가-힣a-zA-Z0-9]/g, "")
+        .toLowerCase();
 
     // =====================================================
     // 2️⃣ 예약 조회
     // =====================================================
     const [bookings] = await conn.query(`
-      SELECT *
+      SELECT booking_id, product_name, check_in, check_out
       FROM naver_bookings
       WHERE cancel_date2 IS NULL
         AND check_out > NOW()
@@ -2370,149 +2368,57 @@ export const syncNaverBookingsToRooms = async () => {
     `);
 
     // =====================================================
-    // 3️⃣ 그룹핑 (핵심 수정)
+    // 3️⃣ 그룹별 예약기간 수집
     // =====================================================
-    const groupedBookings = {};
+    const groupedDates = {};
 
-    for (const item of bookings) {
-      const product = normalize(item.product_name);
+    for (const group of groups) {
+      groupedDates[group.id] = [];
+    }
+
+    for (const booking of bookings) {
+      const product = normalize(booking.product_name);
 
       const group = groups.find((g) => {
         const gname = normalize(g.name);
 
-        if (!product || !gname) return false;
-
-       
-
         return product.includes(gname) || gname.includes(product);
       });
 
-      if (!group) continue;
-
-      if (!groupedBookings[group.id]) {
-        groupedBookings[group.id] = {
-          group,
-          list: [],
-        };
+      if (!group) {
+        console.log("⚠️ 그룹 매칭 실패:", booking.product_name);
+        continue;
       }
 
-      groupedBookings[group.id].list.push(item);
+      groupedDates[group.id].push({
+        check_in: new Date(booking.check_in).toISOString().slice(0, 10),
+        check_out: new Date(booking.check_out).toISOString().slice(0, 10),
+      });
     }
-    console.log(groupedBookings)
+
     // =====================================================
-    // 4️⃣ 그룹별 배정
+    // 4️⃣ room_group json 저장
     // =====================================================
-    const roomCache = {};
-
-    for (const groupId in groupedBookings) {
-      const { group, list } = groupedBookings[groupId];
-
-      if (!roomCache[groupId]) {
-      const [rooms] = await conn.query(`
-      SELECT * FROM room
-      WHERE room_group_id = ?
-      ORDER BY id ASC
-      `, [groupId]);
-
-      
-
-      roomCache[groupId] = rooms;
-      }  
-      const rooms = roomCache[groupId];
-
-      console.log("🔥 ROOM LOAD:", groupId, rooms.length, rooms.map(r => r.id));
-      if (!rooms.length) continue;
-
-      // room별 스케줄
-     
-
-      
-
-      // =====================================================
-      // 5️⃣ 배정 로직
-      // =====================================================
-     const roomSchedules = new Map();
-
-for (const room of rooms) {
-  roomSchedules.set(room.id, []);
-}
-
-for (const booking of list) {
-  const bStart = new Date(booking.check_in);
-  const bEnd = new Date(booking.check_out);
-  
-  let assigned = false;
-
-  for (const room of rooms) {
-    const schedule = roomSchedules.get(room.id);
-
-    if (!schedule) continue; // 🔥 방어 코드
-
-    const conflict = schedule.some(s =>
-      bStart < s.end && s.start < bEnd
-    );
-
-    if (!conflict) {
-      
-      schedule.push({ start: bStart, end: bEnd });
-
+    for (const groupId in groupedDates) {
       await conn.query(`
-        INSERT INTO room_booking
-        (room_id, booking_id, check_in, check_out)
-        VALUES (?, ?, ?, ?)
-      `, [
-        room.id,
-        booking.booking_id,
-        booking.check_in,
-        booking.check_out
-      ]);
-
-      assigned = true;
-      break;
-    }
-  }
-
-  if (!assigned) {
-    console.log("⚠️ 방 부족:", booking.product_name);
-  }
-}
-    }
-
-    // =====================================================
-    // 6️⃣ room 상태 업데이트
-    // =====================================================
-    const [activeBookings] = await conn.query(`
-      SELECT *
-      FROM room_booking
-      WHERE check_out > NOW()
-    `);
-    console.log("true booking:",activeBookings.map((a) => a),activeBookings.length)  
-    const now = new Date();
-
-    for (const b of activeBookings) {
-      const isStaying =
-        now >= new Date(b.check_in) && now < new Date(b.check_out);
-      console.log(isStaying, "what the fuck" , b.check_out)
-      await conn.query(`
-        UPDATE room
-        SET
-          is_ota = 1,
-          is_active = 0,
-          available = ?,
-          disable_start = ?,
-          disable_end = ?
+        UPDATE room_group
+        SET check_in_and_out = ?
         WHERE id = ?
       `, [
-        isStaying ? 0 : 1,
-        now.toISOString().slice(0,10),
-        new Date(b.check_out).toISOString().slice(0,10),
-        b.room_id,
+        JSON.stringify(groupedDates[groupId]),
+        groupId
       ]);
+
+      console.log(
+        `🟢 group ${groupId}:`,
+        groupedDates[groupId].length,
+        "건 저장"
+      );
     }
 
     await conn.commit();
 
-    console.log("🟢 [SYNC] 완료");
+    console.log("🟢 [SYNC 완료]");
 
   } catch (err) {
     await conn.rollback();
