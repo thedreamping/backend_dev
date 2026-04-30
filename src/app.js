@@ -2360,7 +2360,8 @@ export const syncNaverBookingsToRooms = async () => {
         disable_start = NULL,
         disable_end = NULL,
         check_in = NULL,
-        check_out = NULL
+        check_out = NULL,
+        is_ota = 0
     `);
 
     // =====================================================
@@ -2420,7 +2421,7 @@ export const syncNaverBookingsToRooms = async () => {
     }
 
     // =====================================================
-    // 4️⃣ room 마킹
+    // 4️⃣ room 배정
     // =====================================================
     for (const groupId in groupedDates) {
       const periods = groupedDates[groupId];
@@ -2438,6 +2439,7 @@ export const syncNaverBookingsToRooms = async () => {
         roomSchedules.set(room.id, []);
       }
 
+      // 예약 배정만 수행
       for (const period of periods) {
         const start = new Date(period.check_in);
         const end = new Date(period.check_out);
@@ -2445,7 +2447,7 @@ export const syncNaverBookingsToRooms = async () => {
         for (const room of rooms) {
           const schedule = roomSchedules.get(room.id);
 
-          const overlap = schedule.some(s =>
+          const overlap = schedule.some((s) =>
             start < new Date(s.end) &&
             new Date(s.start) < end
           );
@@ -2455,28 +2457,43 @@ export const syncNaverBookingsToRooms = async () => {
               start: period.check_in,
               end: period.check_out
             });
-
-            await conn.query(`
-              UPDATE room
-              SET
-                is_active = 0,
-                available = 0,
-                disable_start = ?,
-                disable_end = ?,
-                check_in = ?,
-                check_out = ?
-              WHERE id = ?
-            `, [
-              period.check_in,
-              period.check_out,
-              period.check_in,
-              period.check_out,
-              room.id
-            ]);
-
             break;
           }
         }
+      }
+
+      // =====================================================
+      // 5️⃣ 각 room의 가장 빠른 예약만 마킹
+      // =====================================================
+      for (const room of rooms) {
+        const schedule = roomSchedules.get(room.id);
+
+        if (!schedule.length) continue;
+
+        schedule.sort((a, b) =>
+          new Date(a.start) - new Date(b.start)
+        );
+
+        const first = schedule[0];
+
+        await conn.query(`
+          UPDATE room
+          SET
+            is_active = 0,
+            available = 0,
+            disable_start = ?,
+            disable_end = ?,
+            check_in = ?,
+            check_out = ?,
+            is_ota = 1
+          WHERE id = ?
+        `, [
+          first.start,
+          first.end,
+          first.start,
+          first.end,
+          room.id
+        ]);
       }
     }
 
