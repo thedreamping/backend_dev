@@ -2326,7 +2326,6 @@ app.get("/api/naver-status", async (req, res) => {
     });
   }
 });
-
 export const syncNaverBookingsToRooms = async () => {
   const conn = await pool.getConnection();
 
@@ -2335,20 +2334,33 @@ export const syncNaverBookingsToRooms = async () => {
 
     console.log("🟡 [SYNC] 시작", new Date().toISOString());
 
-    // =====================================================
-    // KST 날짜 변환
-    // =====================================================
     const toKSTDate = (date) =>
       new Intl.DateTimeFormat("sv-SE", {
         timeZone: "Asia/Seoul",
       }).format(new Date(date));
 
+    const normalize = (str) =>
+      (str || "")
+        .replace(/[^가-힣a-zA-Z0-9]/g, "")
+        .toLowerCase();
+
     // =====================================================
-    // 0️⃣ room_group check_in_and_out 전체 초기화
+    // 0️⃣ 초기화
     // =====================================================
     await conn.query(`
       UPDATE room_group
       SET check_in_and_out = JSON_ARRAY()
+    `);
+
+    await conn.query(`
+      UPDATE room
+      SET
+        is_active = 1,
+        available = 1,
+        disable_start = NULL,
+        disable_end = NULL,
+        check_in = NULL,
+        check_out = NULL
     `);
 
     // =====================================================
@@ -2359,11 +2371,6 @@ export const syncNaverBookingsToRooms = async () => {
       FROM room_group
       WHERE is_active = 1
     `);
-
-    const normalize = (str) =>
-      (str || "")
-        .replace(/[^가-힣a-zA-Z0-9]/g, "")
-        .toLowerCase();
 
     // =====================================================
     // 2️⃣ 예약 조회
@@ -2376,9 +2383,6 @@ export const syncNaverBookingsToRooms = async () => {
       ORDER BY check_in ASC, created_at ASC
     `);
 
-    // =====================================================
-    // 3️⃣ 그룹별 예약기간 수집
-    // =====================================================
     const groupedDates = {};
 
     for (const group of groups) {
@@ -2393,10 +2397,7 @@ export const syncNaverBookingsToRooms = async () => {
         return product.includes(gname) || gname.includes(product);
       });
 
-      if (!group) {
-        console.log("⚠️ 그룹 매칭 실패:", booking.product_name);
-        continue;
-      }
+      if (!group) continue;
 
       groupedDates[group.id].push({
         check_in: toKSTDate(booking.check_in),
@@ -2405,7 +2406,7 @@ export const syncNaverBookingsToRooms = async () => {
     }
 
     // =====================================================
-    // 4️⃣ room_group 저장
+    // 3️⃣ room_group 저장
     // =====================================================
     for (const groupId in groupedDates) {
       await conn.query(`
@@ -2416,10 +2417,67 @@ export const syncNaverBookingsToRooms = async () => {
         JSON.stringify(groupedDates[groupId]),
         groupId
       ]);
+    }
 
-      console.log(
-        `🟢 group ${groupId}: ${groupedDates[groupId].length}건 저장`
-      );
+    // =====================================================
+    // 4️⃣ room 마킹
+    // =====================================================
+    for (const groupId in groupedDates) {
+      const periods = groupedDates[groupId];
+
+      const [rooms] = await conn.query(`
+        SELECT id
+        FROM room
+        WHERE room_group_id = ?
+        ORDER BY id ASC
+      `, [groupId]);
+
+      const roomSchedules = new Map();
+
+      for (const room of rooms) {
+        roomSchedules.set(room.id, []);
+      }
+
+      for (const period of periods) {
+        const start = new Date(period.check_in);
+        const end = new Date(period.check_out);
+
+        for (const room of rooms) {
+          const schedule = roomSchedules.get(room.id);
+
+          const overlap = schedule.some(s =>
+            start < new Date(s.end) &&
+            new Date(s.start) < end
+          );
+
+          if (!overlap) {
+            schedule.push({
+              start: period.check_in,
+              end: period.check_out
+            });
+
+            await conn.query(`
+              UPDATE room
+              SET
+                is_active = 0,
+                available = 0,
+                disable_start = ?,
+                disable_end = ?,
+                check_in = ?,
+                check_out = ?
+              WHERE id = ?
+            `, [
+              period.check_in,
+              period.check_out,
+              period.check_in,
+              period.check_out,
+              room.id
+            ]);
+
+            break;
+          }
+        }
+      }
     }
 
     await conn.commit();
@@ -2456,11 +2514,12 @@ app.get("/api/for_debuging", async (req, res) => {
   try {
     const [rows] = await pool.query(`SELECT * FROM naver_bookings ORDER BY id ASC`);
     const [rows2] = await pool.query(`SELECT * FROM room_group ORDER BY id ASC`);
-
+    const [rows3] = await pool.query(`SELECT * FROM room ORDER BY id ASC`);
     return res.json({
       ok: true,
       naver_data: rows,
       our_data: rows2,
+      room: rows3,
     });
   } catch (e) {
     console.error("room_group fetch error:", e);
