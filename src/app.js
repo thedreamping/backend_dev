@@ -2352,17 +2352,18 @@ export const syncNaverBookingsToRooms = async () => {
       SET check_in_and_out = JSON_ARRAY()
     `);
 
-    await conn.query(`
-      UPDATE room
-      SET
-        is_active = 1,
-        available = 1,
-        disable_start = NULL,
-        disable_end = NULL,
-        check_in = NULL,
-        check_out = NULL,
-        is_ota = 0
-    `);
+   await conn.query(`
+    UPDATE room
+    SET
+      is_active = 1,
+      available = 1,
+      disable_start = NULL,
+      disable_end = NULL,
+      check_in = NULL,
+      check_out = NULL,
+      is_ota = 0
+    WHERE is_soogie IS NULL OR is_soogie = 0
+  `);
 
     // =====================================================
     // 1️⃣ 그룹 조회
