@@ -1329,7 +1329,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           is_active = ?,
           reason = ?,
           disable_start = ?,
-          disable_end = ?
+          disable_end = ?,
+          is_soogie = 1
       WHERE id = ?
       `,
       [
@@ -1570,7 +1571,8 @@ app.put("/api/rooms/bulk-update", verifyToken, async (req, res) => {
         is_active = ?,
         reason = ?,
         disable_start = ?,
-        disable_end = ?
+        disable_end = ?,
+        is_soogie = 1
       WHERE id IN (${placeholders})
       `,
       [
