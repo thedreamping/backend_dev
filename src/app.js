@@ -2430,11 +2430,12 @@ export const syncNaverBookingsToRooms = async () => {
       const periods = groupedDates[groupId];
 
       const [rooms] = await conn.query(`
-        SELECT id
-        FROM room
-        WHERE room_group_id = ?
-        ORDER BY id ASC
-      `, [groupId]);
+      SELECT id
+      FROM room
+      WHERE room_group_id = ?
+        AND (is_soogie IS NULL OR is_soogie = 0)
+      ORDER BY id ASC
+    `, [groupId]);
 
       const roomSchedules = new Map();
 
