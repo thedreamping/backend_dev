@@ -1286,22 +1286,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         });
       }
     }
-
-    const finalReason = Number(is_active) === 1 ? null : reason.trim();
-    const finalStart = Number(is_active) === 1 ? null : disable_start;
-    const finalEnd = Number(is_active) === 1 ? null : disable_end;
-    const finalCheckIn = Number(is_active) === 1 ? null : disable_start;
-    const finalCheckOut = Number(is_active) === 1 ? null : disable_end;
-    const finalSoogie =
-      Number(is_active) === 0
-        ? 1
-        : 0;
-
-    const lodgement = numericDayUse === 1 ? 0 : 1;
-
-    // ✅ 1️⃣ 해당 room의 group id 조회
     const [roomRows] = await pool.query(
-      `SELECT room_group_id FROM room WHERE id = ?`,
+      `SELECT room_group_id, is_ota FROM room WHERE id = ?`,
       [id]
     );
 
@@ -1313,6 +1299,20 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     }
 
     const roomGroupId = roomRows[0].room_group_id;
+    const currentIsOta = roomRows[0].is_ota;
+
+    const finalReason = Number(is_active) === 1 ? null : reason.trim();
+    const finalStart = Number(is_active) === 1 ? null : disable_start;
+    const finalEnd = Number(is_active) === 1 ? null : disable_end;
+    const finalCheckIn = Number(is_active) === 1 ? null : disable_start;
+    const finalCheckOut = Number(is_active) === 1 ? null : disable_end;
+    const finalSoogie = Number(is_active) === 0 ? 1 : 0;
+
+    // 수기예약이면 OTA 해제, 아니면 기존값 유지
+    const finalIsOta = finalSoogie === 1 ? 0 : currentIsOta;
+
+    const lodgement = numericDayUse === 1 ? 0 : 1;
+
 
     // ✅ 2️⃣ 그룹 전체 capacity/day_use/lodgement 일괄 수정
     await pool.query(
@@ -1339,7 +1339,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           check_in = ?,
           check_out = ?,
           is_soogie = ?,
-          is_ota = 0
+          is_ota = ?
       WHERE id = ?
       `,
       [
@@ -1351,6 +1351,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         finalCheckIn,
         finalCheckOut,
         finalSoogie,
+        finalIsOta,
         id,
       ]
     );
