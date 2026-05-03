@@ -1290,6 +1290,12 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     const finalReason = Number(is_active) === 1 ? null : reason.trim();
     const finalStart = Number(is_active) === 1 ? null : disable_start;
     const finalEnd = Number(is_active) === 1 ? null : disable_end;
+    const finalCheckIn = Number(is_active) === 1 ? null : disable_start;
+    const finalCheckOut = Number(is_active) === 1 ? null : disable_end;
+    const finalSoogie =
+      Number(is_active) === 0
+        ? 1
+        : 0;
 
     const lodgement = numericDayUse === 1 ? 0 : 1;
 
@@ -1330,7 +1336,10 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           reason = ?,
           disable_start = ?,
           disable_end = ?,
-          is_soogie = 1
+          check_in = ?,
+          check_out = ?,
+          is_soogie = ?,
+          is_ota = 0
       WHERE id = ?
       `,
       [
@@ -1339,6 +1348,9 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         finalReason,
         finalStart,
         finalEnd,
+        finalCheckIn,
+        finalCheckOut,
+        finalSoogie,
         id,
       ]
     );
@@ -2357,14 +2369,16 @@ export const syncNaverBookingsToRooms = async () => {
    await conn.query(`
     UPDATE room
     SET
+      is_soogie = 0,
       is_active = 1,
       available = 1,
+      reason = NULL,
       disable_start = NULL,
       disable_end = NULL,
       check_in = NULL,
-      check_out = NULL,
-      is_ota = 0
-    WHERE is_soogie IS NULL OR is_soogie = 0
+      check_out = NULL
+    WHERE is_soogie = 1
+      AND disable_end < NOW()
   `);
 
     // =====================================================
