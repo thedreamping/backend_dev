@@ -2543,11 +2543,15 @@ export const syncNaverBookingsToRooms = async () => {
             start < s.end &&
             s.start < end
           );
-
+          const compareEnd =
+            period.check_in === period.check_out
+              ? addOneDay(period.check_out)
+              : period.check_out;
           if (!overlap) {
             schedule.push({
-              start: period.check_in,
-              end: period.check_out
+              start: period.check_in,      // 표시용
+              end: period.check_out,       // 표시용
+              compareEnd                  // 계산용
             });
             break;
           }
