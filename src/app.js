@@ -2523,7 +2523,6 @@ export const syncNaverBookingsToRooms = async () => {
         SELECT id
         FROM room
         WHERE room_group_id = ?
-          AND (is_soogie IS NULL OR is_soogie = 0)
         ORDER BY id ASC
       `, [groupId]);
 
@@ -2549,7 +2548,8 @@ export const syncNaverBookingsToRooms = async () => {
           if (!overlap) {
             schedule.push({
               check_in: start,
-              check_out: end
+              check_out: end,
+              source:"naver"
             });
             break;
           }
