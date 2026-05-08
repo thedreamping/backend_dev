@@ -2531,6 +2531,17 @@ export const syncNaverBookingsToRooms = async () => {
         roomSchedules.set(room.id, []);
       }
 
+      const addOneDay = (dateStr) => {
+        const d = new Date(`${dateStr}T00:00:00`);
+        d.setDate(d.getDate() + 1);
+        return d.toISOString().slice(0, 10);
+      };
+
+       const compareEnd =
+            period.check_in === period.check_out
+              ? addOneDay(period.check_out)
+              : period.check_out;
+
       // 예약 배정만 수행
       for (const period of periods) {
         const start = period.check_in;
@@ -2543,10 +2554,7 @@ export const syncNaverBookingsToRooms = async () => {
             start < s.compareEnd &&
             s.start < compareEnd
           );
-          const compareEnd =
-            period.check_in === period.check_out
-              ? addOneDay(period.check_out)
-              : period.check_out;
+         
           if (!overlap) {
             schedule.push({
               start: period.check_in,      // 표시용
@@ -2558,11 +2566,7 @@ export const syncNaverBookingsToRooms = async () => {
         }
       }
 
-      const addOneDay = (dateStr) => {
-        const d = new Date(`${dateStr}T00:00:00`);
-        d.setDate(d.getDate() + 1);
-        return d.toISOString().slice(0, 10);
-      };
+      
       // =====================================================
       // 5️⃣ 각 room의 가장 빠른 예약만 마킹
       // =====================================================
