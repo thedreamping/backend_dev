@@ -141,6 +141,79 @@ app.get("/api/options", async (req, res) => {
   }
 });
 
+app.get("/api/refund-info", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT *
+      FROM refund_info
+      ORDER BY id ASC
+    `);
+
+    return res.json({
+      ok: true,
+      data: rows,
+    });
+  } catch (error) {
+    console.error("refund_info fetch error:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "환불 정보 조회 중 오류 발생",
+    });
+  }
+});
+
+app.put("/api/refund-info/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { changed } = req.body;
+
+    if (changed === undefined || changed === null) {
+      return res.status(400).json({
+        ok: false,
+        message: "changed 값은 필수입니다.",
+      });
+    }
+
+    const numericChanged = Number(changed);
+
+    if (isNaN(numericChanged) || numericChanged < 0 || numericChanged > 100) {
+      return res.status(400).json({
+        ok: false,
+        message: "0~100 사이 숫자만 가능합니다.",
+      });
+    }
+
+    const [result] = await pool.query(
+      `
+      UPDATE refund_info
+      SET per = ?
+      WHERE id = ?
+      `,
+      [numericChanged, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "해당 환불 정책을 찾을 수 없습니다.",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      message: "환불 정책 수정 완료",
+    });
+
+  } catch (error) {
+    console.error("refund_info update error:", error);
+
+    return res.status(500).json({
+      ok: false,
+      message: "환불 정책 수정 중 오류 발생",
+    });
+  }
+});
+
 app.put("/api/options/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
