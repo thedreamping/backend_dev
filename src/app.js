@@ -2531,43 +2531,29 @@ export const syncNaverBookingsToRooms = async () => {
         roomSchedules.set(room.id, []);
       }
 
-      const addOneDay = (dateStr) => {
-        const d = new Date(`${dateStr}T00:00:00`);
-        d.setDate(d.getDate() + 1);
-        return d.toISOString().slice(0, 10);
-      };
-
-      
-
       // 예약 배정만 수행
       for (const period of periods) {
         const start = period.check_in;
         const end = period.check_out;
-         const compareEnd =
-            period.check_in === period.check_out
-              ? addOneDay(period.check_out)
-              : period.check_out;
 
         for (const room of rooms) {
           const schedule = roomSchedules.get(room.id);
 
           const overlap = schedule.some((s) =>
-            start < s.compareEnd &&
-            s.start < compareEnd
+            start < s.end &&
+            s.start < end
           );
-         
+
           if (!overlap) {
             schedule.push({
-              start: period.check_in,      // 표시용
-              end: period.check_out,       // 표시용
-              compareEnd                  // 계산용
+              start: period.check_in,
+              end: period.check_out
             });
             break;
           }
         }
       }
 
-      
       // =====================================================
       // 5️⃣ 각 room의 가장 빠른 예약만 마킹
       // =====================================================
@@ -2576,9 +2562,20 @@ export const syncNaverBookingsToRooms = async () => {
 
         if (!schedule.length) continue;
 
-        schedule.sort((a, b) =>
-          a.start.localeCompare(b.start)
-        );
+        schedule.sort((a, b) => {
+          const dateCompare = a.start.localeCompare(b.start);
+
+          if (dateCompare !== 0) return dateCompare;
+
+          // 같은 날짜면 당일 예약 우선
+          const aSameDay = a.start === a.end;
+          const bSameDay = b.start === b.end;
+
+          if (aSameDay && !bSameDay) return -1;
+          if (!aSameDay && bSameDay) return 1;
+
+          return 0;
+        });
 
         const first = schedule[0];
 
