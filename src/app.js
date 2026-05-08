@@ -2533,15 +2533,15 @@ export const syncNaverBookingsToRooms = async () => {
 
       // 예약 배정만 수행
       for (const period of periods) {
-        const start = new Date(period.check_in);
-        const end = new Date(period.check_out);
+        const start = period.check_in;
+        const end = period.check_out;
 
         for (const room of rooms) {
           const schedule = roomSchedules.get(room.id);
 
           const overlap = schedule.some((s) =>
-            start < new Date(s.end) &&
-            new Date(s.start) < end
+            start < s.end &&
+            s.start < end
           );
 
           if (!overlap) {
@@ -2563,7 +2563,7 @@ export const syncNaverBookingsToRooms = async () => {
         if (!schedule.length) continue;
 
         schedule.sort((a, b) =>
-          new Date(a.start) - new Date(b.start)
+          a.start.localeCompare(b.start)
         );
 
         const first = schedule[0];
