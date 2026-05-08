@@ -2541,8 +2541,8 @@ export const syncNaverBookingsToRooms = async () => {
           const schedule = roomSchedules.get(room.id);
 
           const overlap = schedule.some((s) =>
-            start < s.check_out &&
-            s.check_in < end
+            start <= s.end &&
+            s.start <= end
           );
 
           if (!overlap) {
