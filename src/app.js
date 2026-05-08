@@ -2414,6 +2414,7 @@ app.get("/api/naver-status", async (req, res) => {
     });
   }
 });
+
 export const syncNaverBookingsToRooms = async () => {
   const conn = await pool.getConnection();
 
@@ -2440,20 +2441,21 @@ export const syncNaverBookingsToRooms = async () => {
       SET check_in_and_out = JSON_ARRAY()
     `);
 
-   await conn.query(`
-    UPDATE room
-    SET
-      is_soogie = 0,
-      is_active = 1,
-      available = 1,
-      reason = NULL,
-      disable_start = NULL,
-      disable_end = NULL,
-      check_in = NULL,
-      check_out = NULL
-    WHERE is_soogie = 1
-      AND disable_end < NOW()
-  `);
+    await conn.query(`
+      UPDATE room
+      SET
+        is_soogie = 0,
+        is_active = 1,
+        available = 1,
+        reason = NULL,
+        disable_start = NULL,
+        disable_end = NULL,
+        check_in = NULL,
+        check_out = NULL,
+        check_in_and_out = JSON_ARRAY()
+      WHERE is_soogie = 1
+        AND disable_end < NOW()
+    `);
 
     // =====================================================
     // 1️⃣ 그룹 조회
@@ -2518,12 +2520,12 @@ export const syncNaverBookingsToRooms = async () => {
       const periods = groupedDates[groupId];
 
       const [rooms] = await conn.query(`
-      SELECT id
-      FROM room
-      WHERE room_group_id = ?
-        AND (is_soogie IS NULL OR is_soogie = 0)
-      ORDER BY id ASC
-    `, [groupId]);
+        SELECT id
+        FROM room
+        WHERE room_group_id = ?
+          AND (is_soogie IS NULL OR is_soogie = 0)
+        ORDER BY id ASC
+      `, [groupId]);
 
       const roomSchedules = new Map();
 
@@ -2531,7 +2533,7 @@ export const syncNaverBookingsToRooms = async () => {
         roomSchedules.set(room.id, []);
       }
 
-      // 예약 배정만 수행
+      // 예약 배정
       for (const period of periods) {
         const start = period.check_in;
         const end = period.check_out;
@@ -2540,14 +2542,14 @@ export const syncNaverBookingsToRooms = async () => {
           const schedule = roomSchedules.get(room.id);
 
           const overlap = schedule.some((s) =>
-            start < s.end &&
-            s.start < end
+            start < s.check_out &&
+            s.check_in < end
           );
 
           if (!overlap) {
             schedule.push({
-              start: period.check_in,
-              end: period.check_out
+              check_in: start,
+              check_out: end
             });
             break;
           }
@@ -2555,7 +2557,7 @@ export const syncNaverBookingsToRooms = async () => {
       }
 
       // =====================================================
-      // 5️⃣ 각 room의 가장 빠른 예약만 마킹
+      // 5️⃣ room별 저장
       // =====================================================
       for (const room of rooms) {
         const schedule = roomSchedules.get(room.id);
@@ -2563,7 +2565,7 @@ export const syncNaverBookingsToRooms = async () => {
         if (!schedule.length) continue;
 
         schedule.sort((a, b) =>
-          a.start.localeCompare(b.start)
+          a.check_in.localeCompare(b.check_in)
         );
 
         const first = schedule[0];
@@ -2577,13 +2579,15 @@ export const syncNaverBookingsToRooms = async () => {
             disable_end = ?,
             check_in = ?,
             check_out = ?,
+            check_in_and_out = ?,
             is_ota = 1
           WHERE id = ?
         `, [
-          first.start,
-          first.end,
-          first.start,
-          first.end,
+          first.check_in,
+          first.check_out,
+          first.check_in,
+          first.check_out,
+          JSON.stringify(schedule),
           room.id
         ]);
       }
