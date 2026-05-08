@@ -2562,20 +2562,9 @@ export const syncNaverBookingsToRooms = async () => {
 
         if (!schedule.length) continue;
 
-        schedule.sort((a, b) => {
-          const dateCompare = a.start.localeCompare(b.start);
-
-          if (dateCompare !== 0) return dateCompare;
-
-          // 같은 날짜면 당일 예약 우선
-          const aSameDay = a.start === a.end;
-          const bSameDay = b.start === b.end;
-
-          if (aSameDay && !bSameDay) return -1;
-          if (!aSameDay && bSameDay) return 1;
-
-          return 0;
-        });
+        schedule.sort((a, b) =>
+          a.start.localeCompare(b.start)
+        );
 
         const first = schedule[0];
 
