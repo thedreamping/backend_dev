@@ -2537,15 +2537,16 @@ export const syncNaverBookingsToRooms = async () => {
         return d.toISOString().slice(0, 10);
       };
 
-       const compareEnd =
-            period.check_in === period.check_out
-              ? addOneDay(period.check_out)
-              : period.check_out;
+      
 
       // 예약 배정만 수행
       for (const period of periods) {
         const start = period.check_in;
         const end = period.check_out;
+         const compareEnd =
+            period.check_in === period.check_out
+              ? addOneDay(period.check_out)
+              : period.check_out;
 
         for (const room of rooms) {
           const schedule = roomSchedules.get(room.id);
