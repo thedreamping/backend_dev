@@ -2540,8 +2540,8 @@ export const syncNaverBookingsToRooms = async () => {
           const schedule = roomSchedules.get(room.id);
 
           const overlap = schedule.some((s) =>
-            start < s.end &&
-            s.start < end
+            start < s.compareEnd &&
+            s.start < compareEnd
           );
           const compareEnd =
             period.check_in === period.check_out
@@ -2558,6 +2558,11 @@ export const syncNaverBookingsToRooms = async () => {
         }
       }
 
+      const addOneDay = (dateStr) => {
+        const d = new Date(`${dateStr}T00:00:00`);
+        d.setDate(d.getDate() + 1);
+        return d.toISOString().slice(0, 10);
+      };
       // =====================================================
       // 5️⃣ 각 room의 가장 빠른 예약만 마킹
       // =====================================================
