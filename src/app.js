@@ -2432,6 +2432,16 @@ export const syncNaverBookingsToRooms = async () => {
       (str || "")
         .replace(/[^가-힣a-zA-Z0-9]/g, "")
         .toLowerCase();
+    
+    const normalizeProduct = (str) => {
+      const normalized = normalize(str);
+
+      if (normalized.includes("오페라")) {
+        return "오페라글램핑";
+      }
+
+      return normalized;
+    };
 
     // =====================================================
     // 0️⃣ 초기화
@@ -2484,7 +2494,7 @@ export const syncNaverBookingsToRooms = async () => {
     }
 
     for (const booking of bookings) {
-      const product = normalize(booking.product_name);
+      const product = normalizeProduct(booking.product_name);
 
       const group = groups.find((g) => {
         const gname = normalize(g.name);
