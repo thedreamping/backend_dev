@@ -1288,6 +1288,7 @@ app.get("/api/room-price", async (req, res) => {
     });
   }
 });
+
 app.put("/api/room/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1301,9 +1302,13 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       day_use,
       disable_start,
       disable_end,
+      manual_booking,
+      cancel_booking
     } = req.body;
 
-    // ✅ 필수값 체크
+    // =================================================
+    // 1️⃣ 필수값 체크
+    // =================================================
     if (
       !name ||
       typeof is_active === "undefined" ||
@@ -1336,7 +1341,9 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       });
     }
 
-    // 🔥 비활성화 시 사유 + 날짜 필수
+    // =================================================
+    // 2️⃣ 비활성화 체크
+    // =================================================
     if (Number(is_active) === 0) {
       if (!reason || reason.trim() === "") {
         return res.status(400).json({
@@ -1359,8 +1366,14 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         });
       }
     }
+
+    // =================================================
+    // 3️⃣ 기존 데이터 조회
+    // =================================================
     const [roomRows] = await pool.query(
-      `SELECT room_group_id, is_ota FROM room WHERE id = ?`,
+      `SELECT room_group_id, is_ota, check_in_and_out_soogie
+       FROM room
+       WHERE id = ?`,
       [id]
     );
 
@@ -1374,20 +1387,58 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     const roomGroupId = roomRows[0].room_group_id;
     const currentIsOta = roomRows[0].is_ota;
 
-    const finalReason = Number(is_active) === 1 ? null : reason.trim();
+    // =================================================
+    // 4️⃣ 수기 예약 JSON 파싱
+    // =================================================
+    let finalSoogieSchedule = [];
+
+    try {
+      finalSoogieSchedule = roomRows[0].check_in_and_out_soogie
+        ? JSON.parse(roomRows[0].check_in_and_out_soogie)
+        : [];
+    } catch {
+      finalSoogieSchedule = [];
+    }
+
+    // =================================================
+    // 5️⃣ ➕ 수기 예약 추가
+    // =================================================
+    if (manual_booking && Number(is_active) === 0) {
+      finalSoogieSchedule.push(manual_booking);
+    }
+
+    // =================================================
+    // 6️⃣ ❌ 수기 예약 취소
+    // =================================================
+    if (cancel_booking) {
+      finalSoogieSchedule = finalSoogieSchedule.filter((b) => {
+        return !(
+          b.check_in === cancel_booking.check_in &&
+          b.check_out === cancel_booking.check_out
+        );
+      });
+    }
+
+    // =================================================
+    // 7️⃣ 상태 계산
+    // =================================================
+    const finalReason = Number(is_active) === 1 ? null : reason?.trim();
     const finalStart = Number(is_active) === 1 ? null : disable_start;
     const finalEnd = Number(is_active) === 1 ? null : disable_end;
-    const finalCheckIn = Number(is_active) === 1 ? null : disable_start;
-    const finalCheckOut = Number(is_active) === 1 ? null : disable_end;
-    const finalSoogie = Number(is_active) === 0 ? 1 : 0;
 
-    // 수기예약이면 OTA 해제, 아니면 기존값 유지
+    const finalCheckIn = finalStart;
+    const finalCheckOut = finalEnd;
+
+    const finalSoogie = finalSoogieSchedule.length > 0 ? 1 : 0;
+    const finalIsActive = finalSoogieSchedule.length > 0 ? 0 : Number(is_active);
+
     const finalIsOta = finalSoogie === 1 ? 0 : currentIsOta;
 
     const lodgement = numericDayUse === 1 ? 0 : 1;
 
-
-    // ✅ 2️⃣ 그룹 전체 capacity/day_use/lodgement 일괄 수정
+    // =================================================
+    // 8️⃣ 그룹 업데이트
+    // =================================================
     await pool.query(
       `
       UPDATE room
@@ -1400,7 +1451,9 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       [numericMax, numericMin, numericDayUse, lodgement, roomGroupId]
     );
 
-    // ✅ 3️⃣ 해당 id 하나만 상세 수정 (🔥 날짜 추가)
+    // =================================================
+    // 9️⃣ 개별 room 업데이트
+    // =================================================
     const [result] = await pool.query(
       `
       UPDATE room
@@ -1412,12 +1465,13 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           check_in = ?,
           check_out = ?,
           is_soogie = ?,
-          is_ota = ?
+          is_ota = ?,
+          check_in_and_out_soogie = ?
       WHERE id = ?
       `,
       [
         name.trim(),
-        Number(is_active),
+        finalIsActive,
         finalReason,
         finalStart,
         finalEnd,
@@ -1425,6 +1479,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         finalCheckOut,
         finalSoogie,
         finalIsOta,
+        JSON.stringify(finalSoogieSchedule),
         id,
       ]
     );
