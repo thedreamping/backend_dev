@@ -1434,7 +1434,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
 
     const finalIsOta = finalSoogie === 1 ? 0 : currentIsOta;
 
-    const lodgement = numericDayUse === 1 ? 0 : 1;
+    const lodgement = 1;
 
     // =================================================
     // 8️⃣ 그룹 업데이트
@@ -1897,7 +1897,7 @@ app.post("/api/room", verifyToken, async (req, res) => {
     }
 
     // 🔥 lodgement 자동 결정
-    const lodgement = numericDayUse === 1 ? 0 : 1;
+    const lodgement = 1;
 
     const finalDescription =
       description && description.trim() !== "" ? description.trim() : null;
