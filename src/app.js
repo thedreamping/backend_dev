@@ -2477,6 +2477,10 @@ export const syncNaverBookingsToRooms = async () => {
     await conn.beginTransaction();
 
     console.log("🟡 [SYNC] 시작", new Date().toISOString());
+     const toKSTDate = (date) =>
+      new Intl.DateTimeFormat("sv-SE", {
+        timeZone: "Asia/Seoul",
+      }).format(new Date(date));
 
     const today = toKSTDate(new Date());
 
@@ -2514,10 +2518,7 @@ export const syncNaverBookingsToRooms = async () => {
       ]);
     }
 
-    const toKSTDate = (date) =>
-      new Intl.DateTimeFormat("sv-SE", {
-        timeZone: "Asia/Seoul",
-      }).format(new Date(date));
+   
 
     const normalize = (str) =>
       (str || "")
