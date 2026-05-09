@@ -1334,15 +1334,35 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       });
     }
 
-    if (numericDayUse !== 0 && numericDayUse !== 1) {
+    if (![0, 1, 2].includes(numericDayUse)) {
       return res.status(400).json({
         ok: false,
-        message: "day_use는 0 또는 1이어야 합니다.",
+        message: "day_use는 0, 1, 2 중 하나여야 합니다.",
       });
     }
 
     // =================================================
-    // 2️⃣ 비활성화 체크
+    // 2️⃣ 예약 타입 계산
+    // 0 = 숙박만
+    // 1 = 데이+숙박
+    // 2 = 데이만
+    // =================================================
+    let finalDayUse = 0;
+    let lodgement = 0;
+
+    if (numericDayUse === 0) {
+      finalDayUse = 0;
+      lodgement = 1;
+    } else if (numericDayUse === 1) {
+      finalDayUse = 1;
+      lodgement = 1;
+    } else if (numericDayUse === 2) {
+      finalDayUse = 1;
+      lodgement = 0;
+    }
+
+    // =================================================
+    // 3️⃣ 비활성화 체크
     // =================================================
     if (Number(is_active) === 0) {
       if (!reason || reason.trim() === "") {
@@ -1368,7 +1388,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     }
 
     // =================================================
-    // 3️⃣ 기존 데이터 조회
+    // 4️⃣ 기존 데이터 조회
     // =================================================
     const [roomRows] = await pool.query(
       `SELECT room_group_id, is_ota, check_in_and_out_soogie
@@ -1388,7 +1408,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     const currentIsOta = roomRows[0].is_ota;
 
     // =================================================
-    // 4️⃣ 수기 예약 JSON 파싱
+    // 5️⃣ 수기예약 JSON 파싱
     // =================================================
     let finalSoogieSchedule = [];
 
@@ -1401,14 +1421,14 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     }
 
     // =================================================
-    // 5️⃣ ➕ 수기 예약 추가
+    // 6️⃣ 수기예약 추가
     // =================================================
     if (manual_booking && Number(is_active) === 0) {
       finalSoogieSchedule.push(manual_booking);
     }
 
     // =================================================
-    // 6️⃣ ❌ 수기 예약 취소
+    // 7️⃣ 수기예약 취소
     // =================================================
     if (cancel_booking) {
       finalSoogieSchedule = finalSoogieSchedule.filter((b) => {
@@ -1420,7 +1440,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     }
 
     // =================================================
-    // 7️⃣ 상태 계산
+    // 8️⃣ 상태 계산
     // =================================================
     const finalReason = Number(is_active) === 1 ? null : reason?.trim();
     const finalStart = Number(is_active) === 1 ? null : disable_start;
@@ -1430,14 +1450,13 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     const finalCheckOut = finalEnd;
 
     const finalSoogie = finalSoogieSchedule.length > 0 ? 1 : 0;
-    const finalIsActive = finalSoogieSchedule.length > 0 ? 0 : Number(is_active);
+    const finalIsActive =
+      finalSoogieSchedule.length > 0 ? 0 : Number(is_active);
 
     const finalIsOta = finalSoogie === 1 ? 0 : currentIsOta;
 
-    const lodgement = 1;
-
     // =================================================
-    // 8️⃣ 그룹 업데이트
+    // 9️⃣ 그룹 전체 옵션 업데이트
     // =================================================
     await pool.query(
       `
@@ -1448,13 +1467,13 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           lodgement = ?
       WHERE room_group_id = ?
       `,
-      [numericMax, numericMin, numericDayUse, lodgement, roomGroupId]
+      [numericMax, numericMin, finalDayUse, lodgement, roomGroupId]
     );
 
     // =================================================
-    // 9️⃣ 개별 room 업데이트
+    // 🔟 개별 room 업데이트
     // =================================================
-    const [result] = await pool.query(
+    await pool.query(
       `
       UPDATE room
       SET name = ?,
@@ -1851,7 +1870,6 @@ app.post("/api/room-group", verifyToken, async (req, res) => {
     });
   }
 });
-
 app.post("/api/room", verifyToken, async (req, res) => {
   try {
     const {
@@ -1863,7 +1881,9 @@ app.post("/api/room", verifyToken, async (req, res) => {
       day_use,
     } = req.body;
 
-    // ✅ 필수값 체크
+    // =================================================
+    // 1️⃣ 필수값 체크
+    // =================================================
     if (
       !name ||
       !room_group_id ||
@@ -1889,19 +1909,41 @@ app.post("/api/room", verifyToken, async (req, res) => {
       });
     }
 
-    if (numericDayUse !== 0 && numericDayUse !== 1) {
+    if (![0, 1, 2].includes(numericDayUse)) {
       return res.status(400).json({
         ok: false,
-        message: "day_use는 0 또는 1이어야 합니다.",
+        message: "day_use는 0, 1, 2 중 하나여야 합니다.",
       });
     }
 
-    // 🔥 lodgement 자동 결정
-    const lodgement = 1;
+    // =================================================
+    // 2️⃣ 예약 타입 계산
+    // 0 = 숙박만
+    // 1 = 데이+숙박
+    // 2 = 데이만
+    // =================================================
+    let finalDayUse = 0;
+    let lodgement = 0;
+
+    if (numericDayUse === 0) {
+      finalDayUse = 0;
+      lodgement = 1;
+    } else if (numericDayUse === 1) {
+      finalDayUse = 1;
+      lodgement = 1;
+    } else if (numericDayUse === 2) {
+      finalDayUse = 1;
+      lodgement = 0;
+    }
 
     const finalDescription =
-      description && description.trim() !== "" ? description.trim() : null;
+      description && description.trim() !== ""
+        ? description.trim()
+        : null;
 
+    // =================================================
+    // 3️⃣ INSERT
+    // =================================================
     const [result] = await pool.query(
       `
       INSERT INTO room
@@ -1925,9 +1967,9 @@ app.post("/api/room", verifyToken, async (req, res) => {
         numericMax,
         numericMin,
         room_group_id,
-        numericDayUse,
+        finalDayUse,
         lodgement,
-      ],
+      ]
     );
 
     return res.json({
@@ -1935,8 +1977,10 @@ app.post("/api/room", verifyToken, async (req, res) => {
       message: "객실 생성 완료",
       id: result.insertId,
     });
+
   } catch (error) {
     console.error("room create error:", error);
+
     return res.status(500).json({
       ok: false,
       message: "객실 생성 중 오류 발생",
