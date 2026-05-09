@@ -2478,6 +2478,42 @@ export const syncNaverBookingsToRooms = async () => {
 
     console.log("🟡 [SYNC] 시작", new Date().toISOString());
 
+    const today = toKSTDate(new Date());
+
+    const [manualRooms] = await conn.query(`
+      SELECT id, check_in_and_out_soogie
+      FROM room
+      WHERE check_in_and_out_soogie IS NOT NULL
+    `);
+
+    for (const room of manualRooms) {
+      let schedules = [];
+
+      try {
+        schedules = Array.isArray(room.check_in_and_out_soogie)
+          ? room.check_in_and_out_soogie
+          : JSON.parse(room.check_in_and_out_soogie || "[]");
+      } catch {
+        schedules = [];
+      }
+
+      const filtered = schedules.filter(
+        (s) => s.check_out >= today
+      );
+
+      await conn.query(`
+        UPDATE room
+        SET
+          check_in_and_out_soogie = ?,
+          is_soogie = ?
+        WHERE id = ?
+      `, [
+        JSON.stringify(filtered),
+        filtered.length ? 1 : 0,
+        room.id
+      ]);
+    }
+
     const toKSTDate = (date) =>
       new Intl.DateTimeFormat("sv-SE", {
         timeZone: "Asia/Seoul",
