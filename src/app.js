@@ -2619,7 +2619,7 @@ export const syncNaverBookingsToRooms = async () => {
       SELECT booking_id, product_name, check_in, check_out
       FROM naver_bookings
       WHERE cancel_date2 IS NULL
-        AND check_out > NOW()
+        AND check_out >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
       ORDER BY check_in ASC, created_at ASC
     `);
 
