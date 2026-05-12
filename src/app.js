@@ -82,7 +82,7 @@ const tokenReissue = async (req, res) => {
 app.use(cors());
 app.use(morgan("dev"));
 app.use(express.json()); // JSON Body 파싱
-app.use(express.urlencoded({ extended: false })); // 폼 파싱
+app.use(express.urlencoded({ extended: true }));
 
 // 헬스체크
 app.get("/health", (req, res) => {
@@ -2048,7 +2048,7 @@ app.post("/api/reservation", async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
-        1,
+        roomInfo.room_group_id,
         roomInfo.room_group_id,
         check_in,
         check_out,
@@ -2157,11 +2157,51 @@ app.post("/api/payment/ready", async (req, res) => {
   }
 });
 
+
 app.post("/api/payment/return", async (req, res) => {
+  const conn = await pool.getConnection();
+
+  const getAllSchedules = (room) => {
+    let naver = [];
+    let soogie = [];
+
+    try {
+      naver =
+        typeof room.check_in_and_out === "string"
+          ? JSON.parse(room.check_in_and_out)
+          : room.check_in_and_out || [];
+    } catch {
+      naver = [];
+    }
+
+    try {
+      soogie =
+        typeof room.check_in_and_out_soogie === "string"
+          ? JSON.parse(room.check_in_and_out_soogie)
+          : room.check_in_and_out_soogie || [];
+    } catch {
+      soogie = [];
+    }
+
+    return [...naver, ...soogie];
+  };
+
+  const isOverlap = (scheduleList, start, end) => {
+    return scheduleList.some((s) => {
+      return start <= s.check_out && s.check_in <= end;
+    });
+  };
+
   try {
+    await conn.beginTransaction();
+
     const { authToken, authUrl } = req.body;
 
+    // =========================
+    // 0️⃣ 기본 검증
+    // =========================
     if (!authToken || !authUrl) {
+      await conn.rollback();
       return res.status(400).json({
         ok: false,
         message: "결제 인증 데이터 없음",
@@ -2169,19 +2209,40 @@ app.post("/api/payment/return", async (req, res) => {
     }
 
     const mid = "cafe246818";
+    const qs = require("querystring");
 
-    // 🔥 1. 이니시스 서버에 검증 요청
-    const response = await axios.post(authUrl, {
-      authToken,
-      mid,
-    });
+    // =========================
+    // 1️⃣ 이니시스 승인
+    // =========================
+    const response = await axios.post(
+      authUrl,
+      qs.stringify({ authToken, mid }),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
 
     const data = response.data;
 
-    console.log("이니시스 검증 응답:", data);
+    console.log("이니시스 응답:", data);
 
-    // 🔴 2. 결제 실패 처리
+    // =========================
+    // 2️⃣ 실패 처리
+    // =========================
     if (data.resultCode !== "0000") {
+      await conn.query(
+        `
+        UPDATE reservations_info
+        SET status = 'cancelled', updated_at = NOW()
+        WHERE order_id = ?
+        `,
+        [data.oid]
+      );
+
+      await conn.commit();
+
       return res.status(400).json({
         ok: false,
         message: "결제 실패",
@@ -2189,13 +2250,22 @@ app.post("/api/payment/return", async (req, res) => {
       });
     }
 
-    // 🔥 3. order_id 기준으로 DB 조회
-    const [rows] = await pool.query(
-      "SELECT * FROM reservations_info WHERE order_id = ?",
-      [data.oid],
+    // =========================
+    // 3️⃣ 예약 조회 (락)
+    // =========================
+    const [rows] = await conn.query(
+      `
+      SELECT * 
+      FROM reservations_info 
+      WHERE order_id = ? 
+      FOR UPDATE
+      `,
+      [data.oid]
     );
 
     if (rows.length === 0) {
+      await conn.rollback();
+
       return res.status(404).json({
         ok: false,
         message: "예약 정보 없음",
@@ -2204,47 +2274,141 @@ app.post("/api/payment/return", async (req, res) => {
 
     const reservation = rows[0];
 
-    // 🔥 4. 금액 검증 (매우 중요)
+    // =========================
+    // 4️⃣ 금액 검증
+    // =========================
     if (Number(reservation.total_amount) !== Number(data.totPrice)) {
+      await conn.query(
+        `
+        UPDATE reservations_info
+        SET status = 'cancelled'
+        WHERE id = ?
+        `,
+        [reservation.id]
+      );
+
+      await conn.commit();
+
       return res.status(400).json({
         ok: false,
-        message: "금액 불일치 (위험 거래)",
+        message: "금액 불일치 (취소 처리)",
       });
     }
 
-    // 🔥 5. 이미 처리된 건 방지 (중복 결제 방지)
+    // =========================
+    // 5️⃣ 중복 결제 방지
+    // =========================
     if (reservation.status === "paid") {
+      await conn.rollback();
+
       return res.json({
         ok: true,
-        message: "이미 처리된 결제",
+        message: "이미 결제 완료",
       });
     }
 
-    // ✅ 6. 결제 성공 처리
-    await pool.query(
+    // =========================
+    // 6️⃣ room 그룹 기반 배정 로직
+    // =========================
+    const groupId = reservation.room_group_id;
+
+    const check_in = reservation.check_in;
+    const check_out = reservation.check_out;
+
+    // 해당 그룹 room 조회
+    const [rooms] = await conn.query(
+      `
+      SELECT * 
+      FROM room
+      WHERE room_group_id = ?
+      ORDER BY id ASC
+      `,
+      [groupId]
+    );
+
+    let assignedRoomId = null;
+
+    for (const room of rooms) {
+      const schedules = getAllSchedules(room);
+
+      const overlap = isOverlap(schedules, check_in, check_out);
+
+      if (!overlap) {
+        assignedRoomId = room.id;
+        break;
+      }
+    }
+
+    if (!assignedRoomId) {
+      await conn.rollback();
+
+      return res.status(400).json({
+        ok: false,
+        message: "배정 가능한 객실 없음",
+      });
+    }
+
+    // =========================
+    // 7️⃣ room 상태 업데이트
+    // =========================
+    await conn.query(
+      `
+      UPDATE room
+      SET 
+        check_in = ?,
+        check_out = ?,
+        check_in_and_out = JSON_ARRAY_APPEND(
+          IFNULL(check_in_and_out, JSON_ARRAY()),
+          '$',
+          JSON_OBJECT(
+            'check_in', ?,
+            'check_out', ?,
+            'source', 'payment'
+          )
+        )
+      WHERE id = ?
+      `,
+      [check_in, check_out, check_in, check_out, assignedRoomId]
+    );
+
+    // =========================
+    // 8️⃣ 예약 확정 처리
+    // =========================
+    await conn.query(
       `
       UPDATE reservations_info
       SET 
         status = 'paid',
+        room_id = ?,
         tid = ?,
         paid_at = NOW(),
         updated_at = NOW()
       WHERE id = ?
       `,
-      [data.tid, reservation.id],
+      [assignedRoomId, data.tid, reservation.id]
     );
+
+    await conn.commit();
 
     return res.json({
       ok: true,
-      message: "결제 성공",
+      message: "결제 + 객실 배정 완료",
+      reservationId: reservation.id,
+      roomId: assignedRoomId,
     });
+
   } catch (error) {
+    await conn.rollback();
+
     console.error("payment return error:", error);
 
     return res.status(500).json({
       ok: false,
-      message: "결제 검증 중 오류",
+      message: "결제 처리 오류",
     });
+
+  } finally {
+    conn.release();
   }
 });
 
@@ -2767,6 +2931,44 @@ setInterval(async () => {
 
 // 초기 1회 실행
 syncNaverBookingsToRooms();
+
+
+export const expirePendingReservations = async (conn) => {
+  await conn.query(`
+    UPDATE reservations_info
+    SET status = 'expired',
+        updated_at = NOW()
+    WHERE status = 'pending'
+      AND created_at < NOW() - INTERVAL 30 MINUTE
+  `);
+};
+
+
+
+// 10분 주기 실행
+let isSyncing2 = false;
+
+const runExpireJob = async () => {
+  if (isSyncing2) return;
+  isSyncing2 = true;
+
+  const conn = await pool.getConnection();
+
+  try {
+    await expirePendingReservations(conn);
+  } catch (err) {
+    console.error("expire job error:", err);
+  } finally {
+    conn.release();
+    isSyncing2 = false;
+  }
+};
+
+// 초기 실행
+runExpireJob();
+
+// 10분 주기
+setInterval(runExpireJob, 1000 * 60 * 10);
 
 
 app.get("/api/for_debuging", async (req, res) => {

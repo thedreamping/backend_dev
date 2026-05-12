@@ -25,6 +25,7 @@
     "multer": "^2.0.2",
     "mysql2": "^3.14.4",
     "node-fetch": "^3.3.2",
+    "querystring": "^0.2.1",
     "request": "^2.88.2",
     "twilio": "^5.10.0"
   },
