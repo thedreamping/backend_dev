@@ -2157,9 +2157,14 @@ app.post("/api/payment/ready", async (req, res) => {
   }
 });
 
-
 app.post("/api/payment/return", async (req, res) => {
   const conn = await pool.getConnection();
+
+  const SUCCESS_URL =
+    "https://thedreamping2026.cafe24.com/shopinfo/payment-complete.html";
+
+  const FAIL_URL =
+    "https://thedreamping2026.cafe24.com/shopinfo/payment-fail.html";
 
   const getAllSchedules = (room) => {
     let naver = [];
@@ -2170,18 +2175,14 @@ app.post("/api/payment/return", async (req, res) => {
         typeof room.check_in_and_out === "string"
           ? JSON.parse(room.check_in_and_out)
           : room.check_in_and_out || [];
-    } catch {
-      naver = [];
-    }
+    } catch {}
 
     try {
       soogie =
         typeof room.check_in_and_out_soogie === "string"
           ? JSON.parse(room.check_in_and_out_soogie)
           : room.check_in_and_out_soogie || [];
-    } catch {
-      soogie = [];
-    }
+    } catch {}
 
     return [...naver, ...soogie];
   };
@@ -2197,23 +2198,17 @@ app.post("/api/payment/return", async (req, res) => {
 
     const { authToken, authUrl } = req.body;
 
-    // =========================
-    // 0️⃣ 기본 검증
-    // =========================
+    console.log("return body:", req.body);
+
     if (!authToken || !authUrl) {
       await conn.rollback();
-      return res.status(400).json({
-        ok: false,
-        message: "결제 인증 데이터 없음",
-      });
+      return res.redirect(FAIL_URL);
     }
 
     const mid = "cafe246818";
     const qs = require("querystring");
 
-    // =========================
-    // 1️⃣ 이니시스 승인
-    // =========================
+    // 1. 승인 요청
     const response = await axios.post(
       authUrl,
       qs.stringify({ authToken, mid }),
@@ -2226,104 +2221,71 @@ app.post("/api/payment/return", async (req, res) => {
 
     const data = response.data;
 
-    console.log("이니시스 응답:", data);
+    console.log("이니시스 승인 결과:", data);
 
-    // =========================
-    // 2️⃣ 실패 처리
-    // =========================
+    // 2. 승인 실패
     if (data.resultCode !== "0000") {
       await conn.query(
         `
         UPDATE reservations_info
-        SET status = 'CANCELLED', updated_at = NOW()
-        WHERE order_id = ?
+        SET status='CANCELLED', updated_at=NOW()
+        WHERE order_id=?
         `,
         [data.oid]
       );
 
       await conn.commit();
-
-      return res.status(400).json({
-        ok: false,
-        message: "결제 실패",
-        data,
-      });
+      return res.redirect(FAIL_URL);
     }
 
-    // =========================
-    // 3️⃣ 예약 조회 (락)
-    // =========================
+    // 3. 예약 조회
     const [rows] = await conn.query(
       `
-      SELECT * 
-      FROM reservations_info 
-      WHERE order_id = ? 
+      SELECT *
+      FROM reservations_info
+      WHERE order_id=?
       FOR UPDATE
       `,
       [data.oid]
     );
 
-    if (rows.length === 0) {
+    if (!rows.length) {
       await conn.rollback();
-
-      return res.status(404).json({
-        ok: false,
-        message: "예약 정보 없음",
-      });
+      return res.redirect(FAIL_URL);
     }
 
     const reservation = rows[0];
 
-    // =========================
-    // 4️⃣ 금액 검증
-    // =========================
+    // 4. 금액 검증
     if (Number(reservation.total_amount) !== Number(data.totPrice)) {
       await conn.query(
         `
         UPDATE reservations_info
-        SET status = 'CANCELLED'
-        WHERE id = ?
+        SET status='CANCELLED'
+        WHERE id=?
         `,
         [reservation.id]
       );
 
       await conn.commit();
-
-      return res.status(400).json({
-        ok: false,
-        message: "금액 불일치 (취소 처리)",
-      });
+      return res.redirect(FAIL_URL);
     }
 
-    // =========================
-    // 5️⃣ 중복 결제 방지
-    // =========================
+    // 5. 중복 방지
     if (reservation.status === "PAID") {
       await conn.rollback();
-
-      return res.json({
-        ok: true,
-        message: "이미 결제 완료",
-      });
+      return res.redirect(SUCCESS_URL);
     }
 
-    // =========================
-    // 6️⃣ room 그룹 기반 배정 로직
-    // =========================
-    const groupId = reservation.room_group_id;
-
-    const check_in = reservation.check_in;
-    const check_out = reservation.check_out;
-
-    // 해당 그룹 room 조회
+    // 6. room 배정
     const [rooms] = await conn.query(
       `
-      SELECT * 
+      SELECT *
       FROM room
-      WHERE room_group_id = ?
+      WHERE room_group_id=?
       ORDER BY id ASC
       `,
-      [groupId]
+      [reservation.room_group_id]
     );
 
     let assignedRoomId = null;
@@ -2331,9 +2293,7 @@ app.post("/api/payment/return", async (req, res) => {
     for (const room of rooms) {
       const schedules = getAllSchedules(room);
 
-      const overlap = isOverlap(schedules, check_in, check_out);
-
-      if (!overlap) {
+      if (!isOverlap(schedules, reservation.check_in, reservation.check_out)) {
         assignedRoomId = room.id;
         break;
       }
@@ -2341,20 +2301,14 @@ app.post("/api/payment/return", async (req, res) => {
 
     if (!assignedRoomId) {
       await conn.rollback();
-
-      return res.status(400).json({
-        ok: false,
-        message: "배정 가능한 객실 없음",
-      });
+      return res.redirect(FAIL_URL);
     }
 
-    // =========================
-    // 7️⃣ room 상태 업데이트
-    // =========================
+    // 7. room schedule append
     await conn.query(
       `
       UPDATE room
-      SET 
+      SET
         check_in = ?,
         check_out = ?,
         check_in_and_out = JSON_ARRAY_APPEND(
@@ -2368,44 +2322,39 @@ app.post("/api/payment/return", async (req, res) => {
         )
       WHERE id = ?
       `,
-      [check_in, check_out, check_in, check_out, assignedRoomId]
+      [
+        reservation.check_in,
+        reservation.check_out,
+        reservation.check_in,
+        reservation.check_out,
+        assignedRoomId
+      ]
     );
 
-    // =========================
-    // 8️⃣ 예약 확정 처리
-    // =========================
+    // 8. 예약 확정
     await conn.query(
       `
       UPDATE reservations_info
-      SET 
-        status = 'PAID',
-        room_id = ?,
-        tid = ?,
-        updated_at = NOW()
-      WHERE id = ?
+      SET
+        status='PAID',
+        room_id=?,
+        tid=?,
+        updated_at=NOW()
+      WHERE id=?
       `,
       [assignedRoomId, data.tid, reservation.id]
     );
 
     await conn.commit();
 
-    return res.json({
-      ok: true,
-      message: "결제 + 객실 배정 완료",
-      reservationId: reservation.id,
-      roomId: assignedRoomId,
-    });
+    return res.redirect(SUCCESS_URL);
 
   } catch (error) {
     await conn.rollback();
-
     console.error("payment return error:", error);
-
-    return res.status(500).json({
-      ok: false,
-      message: "결제 처리 오류",
-    });
-
+    return res.redirect(
+      "https://thedreamping2026.cafe24.com/shopinfo/payment-fail.html"
+    );
   } finally {
     conn.release();
   }
