@@ -2156,15 +2156,8 @@ app.post("/api/payment/ready", async (req, res) => {
     });
   }
 });
-
 app.post("/api/payment/return", async (req, res) => {
   const conn = await pool.getConnection();
-
-  const SUCCESS_URL =
-    "https://thedreamping2026.cafe24.com/shopinfo/payment-complete.html";
-
-  const FAIL_URL =
-    "https://thedreamping2026.cafe24.com/shopinfo/payment-fail.html";
 
   const getAllSchedules = (room) => {
     let naver = [];
@@ -2202,20 +2195,23 @@ app.post("/api/payment/return", async (req, res) => {
 
     if (!authToken || !authUrl) {
       await conn.rollback();
-      return res.redirect(FAIL_URL);
+      return res.json({
+        ok: false,
+        message: "auth 정보 없음"
+      });
     }
 
     const mid = "cafe246818";
     const qs = require("querystring");
 
-    // 1. 승인 요청
+    // 1️⃣ 승인 요청
     const response = await axios.post(
       authUrl,
       qs.stringify({ authToken, mid }),
       {
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
       }
     );
 
@@ -2223,7 +2219,7 @@ app.post("/api/payment/return", async (req, res) => {
 
     console.log("이니시스 승인 결과:", data);
 
-    // 2. 승인 실패
+    // 2️⃣ 승인 실패
     if (data.resultCode !== "0000") {
       await conn.query(
         `
@@ -2235,10 +2231,14 @@ app.post("/api/payment/return", async (req, res) => {
       );
 
       await conn.commit();
-      return res.redirect(FAIL_URL);
+
+      return res.json({
+        ok: false,
+        message: data.resultMsg || "결제 승인 실패"
+      });
     }
 
-    // 3. 예약 조회
+    // 3️⃣ 예약 조회
     const [rows] = await conn.query(
       `
       SELECT *
@@ -2251,12 +2251,16 @@ app.post("/api/payment/return", async (req, res) => {
 
     if (!rows.length) {
       await conn.rollback();
-      return res.redirect(FAIL_URL);
+
+      return res.json({
+        ok: false,
+        message: "예약 없음"
+      });
     }
 
     const reservation = rows[0];
 
-    // 4. 금액 검증
+    // 4️⃣ 금액 검증
     if (Number(reservation.total_amount) !== Number(data.totPrice)) {
       await conn.query(
         `
@@ -2268,16 +2272,24 @@ app.post("/api/payment/return", async (req, res) => {
       );
 
       await conn.commit();
-      return res.redirect(FAIL_URL);
+
+      return res.json({
+        ok: false,
+        message: "금액 불일치"
+      });
     }
 
-    // 5. 중복 방지
+    // 5️⃣ 이미 결제 완료
     if (reservation.status === "PAID") {
       await conn.rollback();
-      return res.redirect(SUCCESS_URL);
+
+      return res.json({
+        ok: true,
+        message: "이미 처리됨"
+      });
     }
 
-    // 6. room 배정
+    // 6️⃣ room 배정
     const [rooms] = await conn.query(
       `
       SELECT *
@@ -2301,17 +2313,21 @@ app.post("/api/payment/return", async (req, res) => {
 
     if (!assignedRoomId) {
       await conn.rollback();
-      return res.redirect(FAIL_URL);
+
+      return res.json({
+        ok: false,
+        message: "배정 가능한 객실 없음"
+      });
     }
 
-    // 7. room schedule append
+    // 7️⃣ room schedule append
     await conn.query(
       `
       UPDATE room
       SET
-        check_in = ?,
-        check_out = ?,
-        check_in_and_out = JSON_ARRAY_APPEND(
+        check_in=?,
+        check_out=?,
+        check_in_and_out=JSON_ARRAY_APPEND(
           IFNULL(check_in_and_out, JSON_ARRAY()),
           '$',
           JSON_OBJECT(
@@ -2320,7 +2336,7 @@ app.post("/api/payment/return", async (req, res) => {
             'source', 'payment'
           )
         )
-      WHERE id = ?
+      WHERE id=?
       `,
       [
         reservation.check_in,
@@ -2331,7 +2347,7 @@ app.post("/api/payment/return", async (req, res) => {
       ]
     );
 
-    // 8. 예약 확정
+    // 8️⃣ 예약 확정
     await conn.query(
       `
       UPDATE reservations_info
@@ -2347,14 +2363,20 @@ app.post("/api/payment/return", async (req, res) => {
 
     await conn.commit();
 
-    return res.redirect(SUCCESS_URL);
+    return res.json({
+      ok: true,
+      message: "결제 성공"
+    });
 
   } catch (error) {
     await conn.rollback();
     console.error("payment return error:", error);
-    return res.redirect(
-      "https://thedreamping2026.cafe24.com/shopinfo/payment-fail.html"
-    );
+
+    return res.json({
+      ok: false,
+      message: error.message || "서버 오류"
+    });
+
   } finally {
     conn.release();
   }
