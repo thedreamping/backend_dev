@@ -2156,99 +2156,155 @@ app.post("/api/payment/ready", async (req, res) => {
     });
   }
 });
-
 app.post("/api/payment/return", async (req, res) => {
   const conn = await pool.getConnection();
 
-  // 리다이렉트 경로 설정 (카페24 주소)
-  const CLIENT_COMPLETE_URL = "https://thedreamping2026.cafe24.com/shopinfo/payment-complete.html";
-  const CLIENT_CANCEL_URL = "https://thedreamping2026.cafe24.com/shopinfo/reservation_search.html";
-
-  // 스케줄 합치기 및 중복 체크 함수 (기존과 동일)
   const getAllSchedules = (room) => {
-    let naver = []; let soogie = [];
-    try { naver = typeof room.check_in_and_out === "string" ? JSON.parse(room.check_in_and_out) : room.check_in_and_out || []; } catch {}
-    try { soogie = typeof room.check_in_and_out_soogie === "string" ? JSON.parse(room.check_in_and_out_soogie) : room.check_in_and_out_soogie || []; } catch {}
+    let naver = [];
+    let soogie = [];
+
+    try {
+      naver =
+        typeof room.check_in_and_out === "string"
+          ? JSON.parse(room.check_in_and_out)
+          : room.check_in_and_out || [];
+    } catch {}
+
+    try {
+      soogie =
+        typeof room.check_in_and_out_soogie === "string"
+          ? JSON.parse(room.check_in_and_out_soogie)
+          : room.check_in_and_out_soogie || [];
+    } catch {}
+
     return [...naver, ...soogie];
   };
 
   const isOverlap = (scheduleList, start, end) => {
-    return scheduleList.some((s) => start <= s.check_out && s.check_in <= end);
+    return scheduleList.some((s) => {
+      return start <= s.check_out && s.check_in <= end;
+    });
   };
 
   try {
     await conn.beginTransaction();
 
-    // 이니시스 표준 결제창은 결과 페이지를 호출할 때 
-    // application/x-www-form-urlencoded 형식으로 데이터를 보냅니다.
     const { authToken, authUrl } = req.body;
 
+    console.log("return body:", req.body);
+
     if (!authToken || !authUrl) {
-      throw new Error("인증 정보(authToken/authUrl)가 누락되었습니다.");
+      await conn.rollback();
+      return res.json({
+        ok: false,
+        message: "auth 정보 없음"
+      });
     }
 
     const mid = "cafe246818";
     const qs = require("querystring");
 
-    // 1️⃣ 이니시스 승인 요청
+    // 1️⃣ 승인 요청
     const response = await axios.post(
       authUrl,
       qs.stringify({ authToken, mid }),
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
+      }
     );
 
     const data = response.data;
 
-    // 2️⃣ 승인 실패 처리
+    console.log("이니시스 승인 결과:", data);
+
+    // 2️⃣ 승인 실패
     if (data.resultCode !== "0000") {
       await conn.query(
-        "UPDATE reservations_info SET status='CANCELLED', updated_at=NOW() WHERE order_id=?",
+        `
+        UPDATE reservations_info
+        SET status='CANCELLED', updated_at=NOW()
+        WHERE order_id=?
+        `,
         [data.oid]
       );
+
       await conn.commit();
-      
-      return res.send(`
-        <script>
-          alert("결제 실패: ${data.resultMsg}");
-          location.href = "${CLIENT_CANCEL_URL}";
-        </script>
-      `);
+
+      return res.json({
+        ok: false,
+        message: data.resultMsg || "결제 승인 실패"
+      });
     }
 
     // 3️⃣ 예약 조회
     const [rows] = await conn.query(
-      "SELECT * FROM reservations_info WHERE order_id=? FOR UPDATE",
+      `
+      SELECT *
+      FROM reservations_info
+      WHERE order_id=?
+      FOR UPDATE
+      `,
       [data.oid]
     );
 
     if (!rows.length) {
-      throw new Error("해당 주문 번호의 예약 내역을 찾을 수 없습니다.");
+      await conn.rollback();
+
+      return res.json({
+        ok: false,
+        message: "예약 없음"
+      });
     }
 
     const reservation = rows[0];
 
     // 4️⃣ 금액 검증
     if (Number(reservation.total_amount) !== Number(data.totPrice)) {
-      await conn.query("UPDATE reservations_info SET status='CANCELLED' WHERE id=?", [reservation.id]);
+      await conn.query(
+        `
+        UPDATE reservations_info
+        SET status='CANCELLED'
+        WHERE id=?
+        `,
+        [reservation.id]
+      );
+
       await conn.commit();
-      return res.send(`<script>alert('금액 불일치로 결제가 취소되었습니다.'); location.href='${CLIENT_CANCEL_URL}';</script>`);
+
+      return res.json({
+        ok: false,
+        message: "금액 불일치"
+      });
     }
 
-    // 5️⃣ 이미 처리된 건 확인
+    // 5️⃣ 이미 결제 완료
     if (reservation.status === "PAID") {
       await conn.rollback();
-      return res.send(`<script>location.href='${CLIENT_COMPLETE_URL}';</script>`);
+
+      return res.json({
+        ok: true,
+        message: "이미 처리됨"
+      });
     }
 
-    // 6️⃣ 빈 객실 배정
+    // 6️⃣ room 배정
     const [rooms] = await conn.query(
-      "SELECT * FROM room WHERE room_group_id=? ORDER BY id ASC",
+      `
+      SELECT *
+      FROM room
+      WHERE room_group_id=?
+      ORDER BY id ASC
+      `,
       [reservation.room_group_id]
     );
 
     let assignedRoomId = null;
+
     for (const room of rooms) {
       const schedules = getAllSchedules(room);
+
       if (!isOverlap(schedules, reservation.check_in, reservation.check_out)) {
         assignedRoomId = room.id;
         break;
@@ -2256,45 +2312,73 @@ app.post("/api/payment/return", async (req, res) => {
     }
 
     if (!assignedRoomId) {
-      throw new Error("선택하신 날짜에 배정 가능한 객실이 없습니다.");
+      await conn.rollback();
+
+      return res.json({
+        ok: false,
+        message: "배정 가능한 객실 없음"
+      });
     }
 
-    // 7️⃣ 객실 스케줄 업데이트 및 예약 확정
+    // 7️⃣ room schedule append
     await conn.query(
-      `UPDATE room SET 
-       check_in_and_out=JSON_ARRAY_APPEND(IFNULL(check_in_and_out, JSON_ARRAY()), '$', 
-       JSON_OBJECT('check_in', ?, 'check_out', ?, 'source', 'payment')) 
-       WHERE id=?`,
-      [reservation.check_in, reservation.check_out, assignedRoomId]
+      `
+      UPDATE room
+      SET
+        check_in=?,
+        check_out=?,
+        check_in_and_out=JSON_ARRAY_APPEND(
+          IFNULL(check_in_and_out, JSON_ARRAY()),
+          '$',
+          JSON_OBJECT(
+            'check_in', ?,
+            'check_out', ?,
+            'source', 'payment'
+          )
+        )
+      WHERE id=?
+      `,
+      [
+        reservation.check_in,
+        reservation.check_out,
+        reservation.check_in,
+        reservation.check_out,
+        assignedRoomId
+      ]
     );
 
+    // 8️⃣ 예약 확정
     await conn.query(
-      "UPDATE reservations_info SET status='PAID', room_id=?, tid=?, updated_at=NOW() WHERE id=?",
+      `
+      UPDATE reservations_info
+      SET
+        status='PAID',
+        room_id=?,
+        tid=?,
+        updated_at=NOW()
+      WHERE id=?
+      `,
       [assignedRoomId, data.tid, reservation.id]
     );
 
     await conn.commit();
 
-    // 8️⃣ [핵심] 성공 후 클라이언트로 리다이렉트
-    // JSON 응답 대신 브라우저를 이동시키는 스크립트를 보냅니다.
-    return res.send(`
-      <script>
-        alert("결제가 성공적으로 완료되었습니다.");
-        location.href = "${CLIENT_COMPLETE_URL}";
-      </script>
-    `);
+    return res.json({
+      ok: true,
+      message: "결제 성공"
+    });
 
   } catch (error) {
-    if (conn) await conn.rollback();
-    console.error("Payment Return Error:", error);
-    return res.send(`
-      <script>
-        alert("오류 발생: ${error.message}");
-        location.href = "${CLIENT_CANCEL_URL}";
-      </script>
-    `);
+    await conn.rollback();
+    console.error("payment return error:", error);
+
+    return res.json({
+      ok: false,
+      message: error.message || "서버 오류"
+    });
+
   } finally {
-    if (conn) conn.release();
+    conn.release();
   }
 });
 
