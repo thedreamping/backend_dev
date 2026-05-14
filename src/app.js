@@ -2934,8 +2934,8 @@ syncNaverBookingsToRooms();
 
 export const expirePendingReservations = async (conn) => {
   await conn.query(`
-    UPDATE reservations_info
-    SET status = 'expired',
+   UPDATE reservations_info
+    SET status = 'CANCELLED',
         updated_at = NOW()
     WHERE status = 'PENDING'
       AND created_at < NOW() - INTERVAL 30 MINUTE
