@@ -2113,8 +2113,8 @@ app.post("/api/payment/ready", async (req, res) => {
 
     const oid = `ORD-${reservation.id}-${Date.now()}`;
     const timestamp = Date.now().toString();
-    const price = reservation.total_amount.toString();
-
+    // const price = reservation.total_amount.toString();
+    const price = "100";
     const signature = crypto
       .createHash("sha256")
       .update(`oid=${oid}&price=${price}&timestamp=${timestamp}`)
