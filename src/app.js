@@ -2045,7 +2045,7 @@ app.post("/api/reservation", async (req, res) => {
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, NOW(), NOW())
+      VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
         roomInfo.room_group_id,
@@ -2101,7 +2101,7 @@ app.post("/api/payment/ready", async (req, res) => {
 
     const reservation = rows[0];
 
-    if (reservation.status !== "pending") {
+    if (reservation.status !== "PENDING") {
       return res.status(400).json({
         ok: false,
         message: "이미 처리된 예약입니다.",
@@ -2235,7 +2235,7 @@ app.post("/api/payment/return", async (req, res) => {
       await conn.query(
         `
         UPDATE reservations_info
-        SET status = 'cancelled', updated_at = NOW()
+        SET status = 'CANCELLED', updated_at = NOW()
         WHERE order_id = ?
         `,
         [data.oid]
@@ -2281,7 +2281,7 @@ app.post("/api/payment/return", async (req, res) => {
       await conn.query(
         `
         UPDATE reservations_info
-        SET status = 'cancelled'
+        SET status = 'CANCELLED'
         WHERE id = ?
         `,
         [reservation.id]
@@ -2298,7 +2298,7 @@ app.post("/api/payment/return", async (req, res) => {
     // =========================
     // 5️⃣ 중복 결제 방지
     // =========================
-    if (reservation.status === "paid") {
+    if (reservation.status === "PAID") {
       await conn.rollback();
 
       return res.json({
@@ -2378,10 +2378,9 @@ app.post("/api/payment/return", async (req, res) => {
       `
       UPDATE reservations_info
       SET 
-        status = 'paid',
+        status = 'PAID',
         room_id = ?,
         tid = ?,
-        paid_at = NOW(),
         updated_at = NOW()
       WHERE id = ?
       `,
@@ -2938,7 +2937,7 @@ export const expirePendingReservations = async (conn) => {
     UPDATE reservations_info
     SET status = 'expired',
         updated_at = NOW()
-    WHERE status = 'pending'
+    WHERE status = 'PENDING'
       AND created_at < NOW() - INTERVAL 30 MINUTE
   `);
 };
