@@ -9,6 +9,7 @@ import verifyToken from "./middlewares/verifyToken.js";
 import pool from "./db.js";
 import multer from "multer";
 import path from "path";
+import qs from "querystring";
 import axios from "axios";
 
 const app = express();
@@ -2156,6 +2157,8 @@ app.post("/api/payment/ready", async (req, res) => {
     });
   }
 });
+
+
 app.post("/api/payment/return", async (req, res) => {
   const conn = await pool.getConnection();
 
@@ -2168,20 +2171,24 @@ app.post("/api/payment/return", async (req, res) => {
         typeof room.check_in_and_out === "string"
           ? JSON.parse(room.check_in_and_out)
           : room.check_in_and_out || [];
-    } catch {}
+    } catch {
+      naver = [];
+    }
 
     try {
       soogie =
         typeof room.check_in_and_out_soogie === "string"
           ? JSON.parse(room.check_in_and_out_soogie)
           : room.check_in_and_out_soogie || [];
-    } catch {}
+    } catch {
+      soogie = [];
+    }
 
     return [...naver, ...soogie];
   };
 
-  const isOverlap = (scheduleList, start, end) => {
-    return scheduleList.some((s) => {
+  const isOverlap = (list, start, end) => {
+    return list.some((s) => {
       return start <= s.check_out && s.check_in <= end;
     });
   };
@@ -2189,7 +2196,7 @@ app.post("/api/payment/return", async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const { authToken, authUrl } = req.body;
+    let { authToken, authUrl, mid } = req.body || {};
 
     console.log("return body:", req.body);
 
@@ -2201,25 +2208,52 @@ app.post("/api/payment/return", async (req, res) => {
       });
     }
 
-    const mid = "cafe246818";
-    const qs = require("querystring");
+      const timestamp = new Date().getTime(); 
 
-    // 1️⃣ 승인 요청
-    const response = await axios.post(
-      authUrl,
-      qs.stringify({ authToken, mid }),
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
+    // mid fallback
+    mid = mid || "cafe246818";
+    const signature  = crypto.createHash("sha256").update("authToken="+authToken+"&timestamp="+timestamp).digest('hex');
+    const verification  = crypto.createHash("sha256").update("authToken="+authToken+"&signKey="+signKey+"&timestamp="+timestamp).digest('hex');
+    // =========================
+    // 1. 이니시스 승인 요청
+    // =========================
+    const format = "JSON"
+    let response;
+    try {
+      response = await axios.post(
+        authUrl,
+        {
+          authToken:req.body.authToken,
+          mid:req.body.mid,
+          charset:req.body.charset,
+          signature:signature,
+          timestamp:timestamp,
+          format:format,
+          verification:verification
+        },
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          timeout: 10000
         }
-      }
-    );
+      );
+    } catch (err) {
+      await conn.rollback();
+      console.error("Inicis request error:", err.message);
+
+      return res.json({
+        ok: false,
+        message: "이니시스 승인 요청 실패"
+      });
+    }
 
     const data = response.data;
-
     console.log("이니시스 승인 결과:", data);
 
-    // 2️⃣ 승인 실패
+    // =========================
+    // 2. 승인 실패
+    // =========================
     if (data.resultCode !== "0000") {
       await conn.query(
         `
@@ -2238,7 +2272,9 @@ app.post("/api/payment/return", async (req, res) => {
       });
     }
 
-    // 3️⃣ 예약 조회
+    // =========================
+    // 3. 예약 조회 (락)
+    // =========================
     const [rows] = await conn.query(
       `
       SELECT *
@@ -2260,7 +2296,9 @@ app.post("/api/payment/return", async (req, res) => {
 
     const reservation = rows[0];
 
-    // 4️⃣ 금액 검증
+    // =========================
+    // 4. 금액 검증
+    // =========================
     if (Number(reservation.total_amount) !== Number(data.totPrice)) {
       await conn.query(
         `
@@ -2279,7 +2317,9 @@ app.post("/api/payment/return", async (req, res) => {
       });
     }
 
-    // 5️⃣ 이미 결제 완료
+    // =========================
+    // 5. 중복 처리 방지
+    // =========================
     if (reservation.status === "PAID") {
       await conn.rollback();
 
@@ -2289,7 +2329,9 @@ app.post("/api/payment/return", async (req, res) => {
       });
     }
 
-    // 6️⃣ room 배정
+    // =========================
+    // 6. 객실 조회
+    // =========================
     const [rooms] = await conn.query(
       `
       SELECT *
@@ -2305,7 +2347,13 @@ app.post("/api/payment/return", async (req, res) => {
     for (const room of rooms) {
       const schedules = getAllSchedules(room);
 
-      if (!isOverlap(schedules, reservation.check_in, reservation.check_out)) {
+      if (
+        !isOverlap(
+          schedules,
+          reservation.check_in,
+          reservation.check_out
+        )
+      ) {
         assignedRoomId = room.id;
         break;
       }
@@ -2320,7 +2368,9 @@ app.post("/api/payment/return", async (req, res) => {
       });
     }
 
-    // 7️⃣ room schedule append
+    // =========================
+    // 7. room 스케줄 업데이트
+    // =========================
     await conn.query(
       `
       UPDATE room
@@ -2347,7 +2397,9 @@ app.post("/api/payment/return", async (req, res) => {
       ]
     );
 
-    // 8️⃣ 예약 확정
+    // =========================
+    // 8. 예약 확정
+    // =========================
     await conn.query(
       `
       UPDATE reservations_info
@@ -2367,16 +2419,15 @@ app.post("/api/payment/return", async (req, res) => {
       ok: true,
       message: "결제 성공"
     });
-
   } catch (error) {
     await conn.rollback();
+
     console.error("payment return error:", error);
 
     return res.json({
       ok: false,
       message: error.message || "서버 오류"
     });
-
   } finally {
     conn.release();
   }
