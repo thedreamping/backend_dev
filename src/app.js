@@ -2213,6 +2213,7 @@ app.post("/api/payment/return", async (req, res) => {
     // mid fallback
     mid = mid || "cafe246818";
     const signature  = crypto.createHash("sha256").update("authToken="+authToken+"&timestamp="+timestamp).digest('hex');
+    const verification  = crypto.createHash("sha256").update("authToken="+authToken+"&signKey="+signKey+"&timestamp="+timestamp).digest('hex');
     // =========================
     // 1. 이니시스 승인 요청
     // =========================
@@ -2227,7 +2228,8 @@ app.post("/api/payment/return", async (req, res) => {
           charset:req.body.charset,
           signature:signature,
           timestamp:timestamp,
-          format:format
+          format:format,
+          verification:verification
         },
         {
           headers: {
