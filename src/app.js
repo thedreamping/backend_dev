@@ -2209,7 +2209,7 @@ app.post("/api/payment/return", async (req, res) => {
     }
 
       const timestamp = new Date().getTime(); 
-
+    const signKey = process.env.INICIS_SIGN_KEY
     // mid fallback
     mid = mid || "cafe246818";
     const signature  = crypto.createHash("sha256").update("authToken="+authToken+"&timestamp="+timestamp).digest('hex');
