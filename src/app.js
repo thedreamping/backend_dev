@@ -127,7 +127,19 @@ app.get("/api/rooms", async (req, res) => {
 
 app.get("/api/options", async (req, res) => {
   try {
-    const [rows] = await pool.query(`SELECT * FROM options ORDER BY id ASC`);
+    const [rows] = await pool.query(`
+      SELECT
+        id,
+        name,
+        price,
+        DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+        DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
+        DATE_FORMAT(start_date_able, '%Y-%m-%d') AS start_date_able,
+        DATE_FORMAT(end_date_able, '%Y-%m-%d') AS end_date_able,
+        is_use
+      FROM options
+      ORDER BY id ASC
+    `);
 
     return res.json({
       ok: true,
