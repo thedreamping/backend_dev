@@ -1370,7 +1370,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       finalDayUse = 1;
       lodgement = 1;
     } else if (numericDayUse === 2) {
-      finalDayUse = 1;
+      finalDayUse = 2;
       lodgement = 0;
     }
 
