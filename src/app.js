@@ -1316,7 +1316,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       disable_start,
       disable_end,
       manual_booking,
-      cancel_booking
+      cancel_booking,
+      soogie
     } = req.body;
 
     // =================================================
@@ -1461,8 +1462,11 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
 
     const finalCheckIn = finalStart;
     const finalCheckOut = finalEnd;
-
     const finalSoogie = finalSoogieSchedule.length > 0 ? 1 : 0;
+    const finalSoogieText =
+          finalSoogieSchedule.length > 0
+            ? (soogie || null)
+            : null;
     const finalIsActive =
       finalSoogieSchedule.length > 0 ? 0 : Number(is_active);
 
@@ -1498,7 +1502,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           check_out = ?,
           is_soogie = ?,
           is_ota = ?,
-          check_in_and_out_soogie = ?
+          check_in_and_out_soogie = ?,
+          soogie = ?
       WHERE id = ?
       `,
       [
@@ -1512,6 +1517,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         finalSoogie,
         finalIsOta,
         JSON.stringify(finalSoogieSchedule),
+        finalSoogieText || null,
         id,
       ]
     );
@@ -2798,7 +2804,9 @@ export const syncNaverBookingsToRooms = async () => {
         disable_end = NULL,
         check_in = NULL,
         check_out = NULL,
-        check_in_and_out = JSON_ARRAY()
+        check_in_and_out = JSON_ARRAY(),
+        is_ota = 0,
+        naver_crawling_info = JSON_ARRAY()
       WHERE is_soogie = 1
         AND disable_end < NOW()
     `);
@@ -2816,7 +2824,15 @@ export const syncNaverBookingsToRooms = async () => {
     // 2️⃣ 예약 조회
     // =====================================================
     const [bookings] = await conn.query(`
-      SELECT booking_id, product_name, check_in, check_out
+      SELECT
+        booking_id,
+        name,
+        phone,
+        product_name,
+        qty,
+        price,
+        check_in,
+        check_out
       FROM naver_bookings
       WHERE cancel_date2 IS NULL
         AND check_out >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
@@ -2842,6 +2858,13 @@ export const syncNaverBookingsToRooms = async () => {
       groupedDates[group.id].push({
         check_in: toKSTDate(booking.check_in),
         check_out: toKSTDate(booking.check_out),
+
+        booking_id: booking.booking_id,
+        name: booking.name,
+        phone: booking.phone,
+        price: booking.price,
+        product_name: booking.product_name,
+        qty: booking.qty
       });
     }
 
@@ -2895,7 +2918,14 @@ export const syncNaverBookingsToRooms = async () => {
             schedule.push({
               check_in: start,
               check_out: end,
-              source:"naver"
+              source: "naver",
+
+              booking_id: period.booking_id,
+              name: period.name,
+              phone: period.phone,
+              price: period.price,
+              product_name: period.product_name,
+              qty: period.qty
             });
             break;
           }
@@ -2926,6 +2956,7 @@ export const syncNaverBookingsToRooms = async () => {
             check_in = ?,
             check_out = ?,
             check_in_and_out = ?,
+            naver_crawling_info = ?,
             is_ota = 1
           WHERE id = ?
         `, [
@@ -2933,7 +2964,25 @@ export const syncNaverBookingsToRooms = async () => {
           first.check_out,
           first.check_in,
           first.check_out,
-          JSON.stringify(schedule),
+          JSON.stringify(
+            schedule.map((s) => ({
+              check_in: s.check_in,
+              check_out: s.check_out,
+              source: s.source
+            }))
+          ),
+          JSON.stringify(
+            schedule.map((s) => ({
+              booking_id: s.booking_id,
+              name: s.name,
+              phone: s.phone,
+              product_name: s.product_name,
+              qty: s.qty,
+              price: s.price,
+              check_in: s.check_in,
+              check_out: s.check_out
+            }))
+          ),
           room.id
         ]);
       }
