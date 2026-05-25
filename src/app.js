@@ -2906,28 +2906,90 @@ export const syncNaverBookingsToRooms = async () => {
         const start = period.check_in;
         const end = period.check_out;
 
-        for (const room of rooms) {
-          const schedule = roomSchedules.get(room.id);
+        const qty = Number(period.qty) || 1;
 
-          const overlap = schedule.some((s) =>
-            start <= s.check_out &&
-            s.check_in <= end
-          );
+        let assignedCount = 0;
 
-          if (!overlap) {
-            schedule.push({
-              check_in: start,
-              check_out: end,
-              source: "naver",
+        for (let q = 0; q < qty; q++) {
 
-              booking_id: period.booking_id,
-              name: period.name,
-              phone: period.phone,
-              price: period.price,
-              product_name: period.product_name,
-              qty: period.qty
-            });
-            break;
+          let assigned = false;
+
+          for (const room of rooms) {
+            const schedule = roomSchedules.get(room.id);
+
+            // 1차 : 일반 체크
+            const strictOverlap = schedule.some((s) =>
+              start <= s.check_out &&
+              s.check_in <= end
+            );
+
+            // 일반 체크 통과
+            if (!strictOverlap) {
+
+              schedule.push({
+                check_in: start,
+                check_out: end,
+                source: "naver",
+
+                booking_id: period.booking_id,
+                name: period.name,
+                phone: period.phone,
+                price: period.price,
+                product_name: period.product_name,
+                qty: period.qty
+              });
+
+              assigned = true;
+              assignedCount++;
+
+              break;
+            }
+          }
+
+          if (!assigned) {
+            // =====================================
+            // 방 부족 시 바톤터치 허용
+            // =====================================
+
+            for (const room of rooms) {
+
+              const schedule = roomSchedules.get(room.id);
+
+              const relaxedOverlap = schedule.some((s) =>
+                start < s.check_out &&
+                s.check_in < end
+              );
+
+              if (!relaxedOverlap) {
+
+                schedule.push({
+                  check_in: start,
+                  check_out: end,
+                  source: "naver",
+
+                  booking_id: period.booking_id,
+                  name: period.name,
+                  phone: period.phone,
+                  price: period.price,
+                  product_name: period.product_name,
+                  qty: period.qty
+                });
+
+                assigned = true;
+                assignedCount++;
+
+                console.log(
+                  `[바톤터치 배정] booking_id=${period.booking_id}`
+                );
+                
+                break;
+              }
+            }
+          }
+          if (!assigned) {
+            console.warn(
+              `[배정 실패] booking_id=${period.booking_id}, qty=${qty}`
+            );
           }
         }
       }
