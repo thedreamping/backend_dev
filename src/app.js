@@ -2676,7 +2676,7 @@ document.mobileweb.submit();
 </body>
 </html>
       `);
-
+    console.log("이거 확인",P_CHKFAKE)    
     } catch (error) {
 
       console.error(
