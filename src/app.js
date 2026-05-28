@@ -2301,7 +2301,7 @@ app.post("/api/payment/return", async (req, res) => {
       WHERE order_id=?
       FOR UPDATE
       `,
-      [data.oid]
+      [data.MOID]
     );
 
     if (!rows.length) {
