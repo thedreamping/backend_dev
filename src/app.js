@@ -2318,7 +2318,7 @@ app.post("/api/payment/return", async (req, res) => {
     // =========================
     // 4. 금액 검증
     // =========================
-    if (Number(reservation.total_amount) !== Number(data.totPrice)) {
+    if (Number(reservation.total_amount) !== Number(data.TotPrice)) {
       await conn.query(
         `
         UPDATE reservations_info
