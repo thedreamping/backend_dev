@@ -2500,8 +2500,9 @@ app.get(
       // =========================
       // 모바일용 주문번호
       // =========================
+      const mid = "cafe246818";
       const oid =
-        `MOBILE-${reservation.id}-${Date.now()}`;
+        `${mid}_${Date.now()}`;
 
       // =========================
       // DB 저장
@@ -2523,7 +2524,7 @@ app.get(
       // =========================
       // 이니시스 설정
       // =========================
-      const mid = "cafe246818";
+      
 
       const signKey =
         process.env.INICIS_SIGN_KEY;
@@ -2534,7 +2535,7 @@ app.get(
         );
 
       const timestamp =
-        Date.now().toString();
+        Date.now();
 
       // =========================
       // 모바일 SHA512
