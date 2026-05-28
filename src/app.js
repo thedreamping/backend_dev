@@ -2660,11 +2660,7 @@ name="P_NOTI"
 value="${reservation.id}"
 />
 
-<input
-type="hidden"
-name="P_RESERVED"
-value="below1000=Y&vbank_receipt=Y&centerCd=Y&amt_hash=Y"
-/>
+
 
 </form>
 
