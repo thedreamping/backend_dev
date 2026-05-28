@@ -2293,6 +2293,7 @@ app.post("/api/payment/return", async (req, res) => {
     // =========================
     // 3. 예약 조회 (락)
     // =========================
+    console.log(data)
     const [rows] = await conn.query(
       `
       SELECT *
@@ -2954,6 +2955,7 @@ app.post(
       // =========================
       // 7. 예약 조회
       // =========================
+    
       const [rows] =
         await conn.query(
           `
@@ -2964,7 +2966,7 @@ app.post(
           `,
           [result.P_OID]
         );
-
+        
       if (!rows.length) {
 
         await conn.rollback();
