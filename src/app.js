@@ -2453,6 +2453,773 @@ app.post("/api/payment/return", async (req, res) => {
 
 
 
+// ======================================================
+// 모바일 이니시스 결제 시작
+// ======================================================
+app.get(
+  "/api/payment/mobile/start/:reservationId",
+  async (req, res) => {
+
+    try {
+
+      const reservationId =
+        req.params.reservationId;
+
+      if (!reservationId) {
+
+        return res.status(400).send("reservationId 없음");
+
+      }
+
+      // =========================
+      // 예약 조회
+      // =========================
+      const [rows] = await pool.query(
+        `
+        SELECT *
+        FROM reservations_info
+        WHERE id = ?
+        `,
+        [reservationId]
+      );
+
+      if (!rows.length) {
+
+        return res.status(404).send("예약 없음");
+
+      }
+
+      const reservation = rows[0];
+
+      if (reservation.status !== "PENDING") {
+
+        return res.send("이미 처리된 예약");
+
+      }
+
+      // =========================
+      // 모바일용 주문번호
+      // =========================
+      const oid =
+        `MOBILE-${reservation.id}-${Date.now()}`;
+
+      // =========================
+      // DB 저장
+      // =========================
+      await pool.query(
+        `
+        UPDATE reservations_info
+        SET
+          order_id = ?,
+          updated_at = NOW()
+        WHERE id = ?
+        `,
+        [
+          oid,
+          reservation.id
+        ]
+      );
+
+      // =========================
+      // 이니시스 설정
+      // =========================
+      const mid = "cafe246818";
+
+      const signKey =
+        process.env.INICIS_SIGN_KEY;
+
+      const price =
+        String(
+          Number(reservation.total_amount)
+        );
+
+      const timestamp =
+        Date.now().toString();
+
+      // =========================
+      // 모바일 SHA512
+      // =========================
+      const hashString =
+        price +
+        oid +
+        timestamp +
+        signKey;
+
+      const P_CHKFAKE =
+        crypto
+          .createHash("sha512")
+          .update(hashString, "utf8")
+          .digest("base64");
+
+      // =========================
+      // NEXT_URL
+      // =========================
+      const nextUrl =
+        "https://dreampingback.duckdns.org:4000/api/payment/mobile/return";
+
+      // =========================
+      // 모바일 자동 submit 페이지
+      // =========================
+      return res.send(`
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta
+name="viewport"
+content="width=device-width, initial-scale=1.0"
+/>
+<title>모바일 결제</title>
+</head>
+
+<body>
+
+<form
+name="mobileweb"
+method="post"
+accept-charset="euc-kr"
+action="https://mobile.inicis.com/smart/payment/"
+>
+
+<input
+type="hidden"
+name="P_INI_PAYMENT"
+value="CARD"
+/>
+
+<input
+type="hidden"
+name="P_MID"
+value="${mid}"
+/>
+
+<input
+type="hidden"
+name="P_OID"
+value="${oid}"
+/>
+
+<input
+type="hidden"
+name="P_AMT"
+value="${price}"
+/>
+
+<input
+type="hidden"
+name="P_GOODS"
+value="더드림핑 예약"
+/>
+
+<input
+type="hidden"
+name="P_UMANE"
+value="${reservation.buyer_name || ""}"
+/>
+
+<input
+type="hidden"
+name="P_MOBILE"
+value="${reservation.buyer_tel || ""}"
+/>
+
+<input
+type="hidden"
+name="P_EMAIL"
+value="${reservation.buyer_email || ""}"
+/>
+
+<input
+type="hidden"
+name="P_NEXT_URL"
+value="${nextUrl}"
+/>
+
+<input
+type="hidden"
+name="P_CHARSET"
+value="utf8"
+/>
+
+<input
+type="hidden"
+name="P_TIMESTAMP"
+value="${timestamp}"
+/>
+
+<input
+type="hidden"
+name="P_CHKFAKE"
+value="${P_CHKFAKE}"
+/>
+
+<input
+type="hidden"
+name="P_NOTI"
+value="${reservation.id}"
+/>
+
+<input
+type="hidden"
+name="P_RESERVED"
+value="below1000=Y&vbank_receipt=Y&centerCd=Y&amt_hash=Y"
+/>
+
+</form>
+
+<script>
+
+document.mobileweb.submit();
+
+</script>
+
+</body>
+</html>
+      `);
+
+    } catch (error) {
+
+      console.error(
+        "mobile start error:",
+        error
+      );
+
+      return res
+        .status(500)
+        .send("모바일 결제 시작 실패");
+
+    }
+
+  }
+);
+
+
+// ======================================================
+// 모바일 이니시스 RETURN
+// ======================================================
+
+app.post(
+  "/api/payment/mobile/return",
+  async (req, res) => {
+
+    const conn =
+      await pool.getConnection();
+
+    const getAllSchedules = (room) => {
+
+      let naver = [];
+      let soogie = [];
+
+      try {
+
+        naver =
+          typeof room.check_in_and_out === "string"
+            ? JSON.parse(room.check_in_and_out)
+            : room.check_in_and_out || [];
+
+      } catch {
+
+        naver = [];
+
+      }
+
+      try {
+
+        soogie =
+          typeof room.check_in_and_out_soogie === "string"
+            ? JSON.parse(room.check_in_and_out_soogie)
+            : room.check_in_and_out_soogie || [];
+
+      } catch {
+
+        soogie = [];
+
+      }
+
+      return [...naver, ...soogie];
+
+    };
+
+    const isOverlap = (
+      list,
+      start,
+      end
+    ) => {
+
+      return list.some((s) => {
+
+        return (
+          start <= s.check_out &&
+          s.check_in <= end
+        );
+
+      });
+
+    };
+
+    try {
+
+      await conn.beginTransaction();
+
+      console.log(
+        "mobile return body:",
+        req.body
+      );
+
+      // =========================
+      // 1. 인증 실패
+      // =========================
+      if (
+        req.body.P_STATUS !== "00"
+      ) {
+
+        await conn.rollback();
+
+        return res.redirect(
+          "https://dreamping.co.kr/shopinfo/payment-cancel.html"
+        );
+
+      }
+
+      // =========================
+      // 2. 필수값
+      // =========================
+      const P_TID =
+        req.body.P_TID;
+
+      const P_AMT =
+        req.body.P_AMT;
+
+      const P_NOTI =
+        req.body.P_NOTI;
+
+      const idc_name =
+        req.body.idc_name;
+
+      const P_REQ_URL =
+        req.body.P_REQ_URL;
+
+      if (
+        !P_TID ||
+        !P_AMT ||
+        !P_NOTI ||
+        !idc_name ||
+        !P_REQ_URL
+      ) {
+
+        await conn.rollback();
+
+        return res.redirect(
+          "https://dreamping.co.kr/shopinfo/payment-cancel.html"
+        );
+
+      }
+
+      // =========================
+      // 3. 승인 URL 검증
+      // =========================
+      let authUrl = "";
+
+      switch (idc_name) {
+
+        case "fc":
+          authUrl =
+            "https://fcmobile.inicis.com/smart/payReq.ini";
+          break;
+
+        case "ks":
+          authUrl =
+            "https://ksmobile.inicis.com/smart/payReq.ini";
+          break;
+
+        case "stg":
+          authUrl =
+            "https://stgmobile.inicis.com/smart/payReq.ini";
+          break;
+
+        default:
+
+          await conn.rollback();
+
+          return res.redirect(
+            "https://dreamping.co.kr/shopinfo/payment-cancel.html"
+          );
+
+      }
+
+      // 샘플과 동일한 검증
+      if (
+        P_REQ_URL !== authUrl
+      ) {
+
+        console.log(
+          "P_REQ_URL mismatch:",
+          P_REQ_URL,
+          authUrl
+        );
+
+        await conn.rollback();
+
+        return res.redirect(
+          "https://dreamping.co.kr/shopinfo/payment-cancel.html"
+        );
+
+      }
+
+      // =========================
+      // 4. 승인 요청
+      // =========================
+      const params =
+        new URLSearchParams();
+
+      params.append(
+        "P_MID",
+        P_TID.substring(10, 20)
+      );
+
+      params.append(
+        "P_TID",
+        P_TID
+      );
+
+      const authResponse =
+        await axios.post(
+          authUrl,
+          params.toString(),
+          {
+            headers: {
+              "Content-Type":
+                "application/x-www-form-urlencoded"
+            },
+            timeout: 10000
+          }
+        );
+
+      // =========================
+      // 5. 응답 파싱
+      // =========================
+      const result = {};
+
+      String(authResponse.data)
+        .split("&")
+        .forEach(item => {
+
+          const idx =
+            item.indexOf("=");
+
+          if (idx > -1) {
+
+            const key =
+              item.substring(0, idx);
+
+            const value =
+              decodeURIComponent(
+                item.substring(idx + 1)
+              );
+
+            result[key] = value;
+
+          }
+
+        });
+
+      console.log(
+        "mobile auth result:",
+        result
+      );
+
+      // =========================
+      // 6. 승인 실패
+      // =========================
+      if (
+        result.P_STATUS !== "00"
+      ) {
+
+        await conn.query(
+          `
+          UPDATE reservations_info
+          SET
+            status='CANCELLED',
+            updated_at=NOW()
+          WHERE order_id=?
+          `,
+          [result.P_OID]
+        );
+
+        await conn.commit();
+
+        return res.redirect(
+          "https://dreamping.co.kr/shopinfo/payment-cancel.html"
+        );
+
+      }
+
+      // =========================
+      // 7. 예약 조회
+      // =========================
+      const [rows] =
+        await conn.query(
+          `
+          SELECT *
+          FROM reservations_info
+          WHERE order_id=?
+          FOR UPDATE
+          `,
+          [result.P_OID]
+        );
+
+      if (!rows.length) {
+
+        await conn.rollback();
+
+        return res.send(
+          "예약 없음"
+        );
+
+      }
+
+      const reservation =
+        rows[0];
+
+      // =========================
+      // 8. 중복 방지
+      // =========================
+      if (
+        reservation.status === "PAID"
+      ) {
+
+        await conn.rollback();
+
+        return res.redirect(
+          "https://dreamping.co.kr/shopinfo/payment-success.html"
+        );
+
+      }
+
+      // =========================
+      // 9. 금액 검증
+      // =========================
+      if (
+        Number(
+          reservation.total_amount
+        ) !==
+        Number(result.P_AMT)
+      ) {
+
+        await conn.query(
+          `
+          UPDATE reservations_info
+          SET
+            status='CANCELLED',
+            updated_at=NOW()
+          WHERE id=?
+          `,
+          [reservation.id]
+        );
+
+        await conn.commit();
+
+        return res.send(
+          "금액 불일치"
+        );
+
+      }
+
+      // =========================
+      // 10. 객실 조회
+      // =========================
+      const [rooms] =
+        await conn.query(
+          `
+          SELECT *
+          FROM room
+          WHERE room_group_id=?
+          ORDER BY id ASC
+          `,
+          [
+            reservation.room_group_id
+          ]
+        );
+
+      let assignedRoomId =
+        null;
+
+      for (const room of rooms) {
+
+        const schedules =
+          getAllSchedules(room);
+
+        if (
+          !isOverlap(
+            schedules,
+            reservation.check_in,
+            reservation.check_out
+          )
+        ) {
+
+          assignedRoomId =
+            room.id;
+
+          break;
+
+        }
+
+      }
+
+      // =========================
+      // 11. 객실 없음
+      // =========================
+      if (!assignedRoomId) {
+
+        // 망취소 권장
+        try {
+
+          const cancelUrl =
+            authUrl.replace(
+              "/smart/payReq.ini",
+              "/smart/payNetCancel.ini"
+            );
+
+          const cancelParams =
+            new URLSearchParams();
+
+          cancelParams.append(
+            "P_TID",
+            P_TID
+          );
+
+          cancelParams.append(
+            "P_MID",
+            P_TID.substring(10, 20)
+          );
+
+          cancelParams.append(
+            "P_AMT",
+            P_AMT
+          );
+
+          cancelParams.append(
+            "P_OID",
+            P_NOTI
+          );
+
+          await axios.post(
+            cancelUrl,
+            cancelParams.toString(),
+            {
+              headers: {
+                "Content-Type":
+                  "application/x-www-form-urlencoded"
+              }
+            }
+          );
+
+          console.log(
+            "망취소 완료"
+          );
+
+        } catch (cancelError) {
+
+          console.error(
+            "망취소 실패:",
+            cancelError
+          );
+
+        }
+
+        await conn.rollback();
+
+        return res.send(
+          "배정 가능한 객실 없음"
+        );
+
+      }
+
+      // =========================
+      // 12. room 업데이트
+      // =========================
+      await conn.query(
+        `
+        UPDATE room
+        SET
+          check_in=?,
+          check_out=?,
+          check_in_and_out=JSON_ARRAY_APPEND(
+            IFNULL(
+              check_in_and_out,
+              JSON_ARRAY()
+            ),
+            '$',
+            JSON_OBJECT(
+              'check_in', ?,
+              'check_out', ?,
+              'source', 'payment'
+            )
+          )
+        WHERE id=?
+        `,
+        [
+          reservation.check_in,
+          reservation.check_out,
+          reservation.check_in,
+          reservation.check_out,
+          assignedRoomId
+        ]
+      );
+
+      // =========================
+      // 13. 예약 완료
+      // =========================
+      await conn.query(
+        `
+        UPDATE reservations_info
+        SET
+          status='PAID',
+          room_id=?,
+          tid=?,
+          updated_at=NOW()
+        WHERE id=?
+        `,
+        [
+          assignedRoomId,
+          result.P_TID,
+          reservation.id
+        ]
+      );
+
+      await conn.commit();
+
+      // =========================
+      // 14. 성공 이동
+      // =========================
+      return res.redirect(
+        "https://dreamping.co.kr/shopinfo/payment-success.html"
+      );
+
+    } catch (error) {
+
+      await conn.rollback();
+
+      console.error(
+        "mobile return error:",
+        error
+      );
+
+      return res.redirect(
+        "https://dreamping.co.kr/shopinfo/payment-cancel.html"
+      );
+
+    } finally {
+
+      conn.release();
+
+    }
+
+  }
+);
+
+
+
 
 app.post("/api/dk_schedule", verifyToken, async (req, res) => {
   try {
