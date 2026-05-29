@@ -3395,6 +3395,103 @@ export const syncNaverBookingsToRooms = async () => {
 
       const filtered = schedules.filter((s) => s.check_out >= today);
 
+      // =====================================================
+      // 수기예약 history 저장
+      // =====================================================
+
+      for (const s of filtered) {
+        const [existsRows] = await conn.query(
+          `
+          SELECT id
+          FROM room_booking_history
+          WHERE
+            source = 'manual'
+            AND room_id = ?
+            AND check_in = ?
+            AND check_out = ?
+            AND (
+              memo = ?
+              OR (memo IS NULL AND ? IS NULL)
+            )
+          LIMIT 1
+        `,
+          [room.id, s.check_in, s.check_out, s.memo || null, s.memo || null],
+        );
+
+        const payload = {
+          ...s,
+        };
+
+        if (existsRows.length > 0) {
+          await conn.query(
+            `
+            UPDATE room_booking_history
+            SET
+              payload = ?,
+              guest_name = ?,
+              guest_phone = ?,
+              memo = ?,
+              canceled = 0
+            WHERE id = ?
+          `,
+            [
+              JSON.stringify(payload),
+
+              s.name || null,
+              s.phone || null,
+
+              s.memo || null,
+
+              existsRows[0].id,
+            ],
+          );
+        } else {
+          await conn.query(
+            `
+            INSERT INTO room_booking_history (
+              payload,
+
+              check_in,
+              check_out,
+
+              room_id,
+
+              source,
+
+              guest_name,
+              guest_phone,
+
+              memo,
+
+              canceled
+            )
+            VALUES (
+              ?,
+              ?, ?,
+              ?,
+              'manual',
+              ?, ?,
+              ?,
+              0
+            )
+          `,
+            [
+              JSON.stringify(payload),
+
+              s.check_in,
+              s.check_out,
+
+              room.id,
+
+              s.name || null,
+              s.phone || null,
+
+              s.memo || null,
+            ],
+          );
+        }
+      }
+
       await conn.query(
         `
         UPDATE room
@@ -3898,7 +3995,7 @@ export const syncNaverBookingsToRooms = async () => {
     conn.release();
   }
 };
-
+syncNaverBookingsToRooms();
 // 10분 주기 실행
 let isSyncing = false;
 
@@ -3917,7 +4014,6 @@ setInterval(
 );
 
 // 초기 1회 실행
-syncNaverBookingsToRooms();
 
 export const expirePendingReservations = async (conn) => {
   await conn.query(`
