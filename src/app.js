@@ -3575,7 +3575,9 @@ export const syncNaverBookingsToRooms = async () => {
         qty,
         price,
         check_in,
-        check_out
+        check_out,
+        booking_option,
+        request_memo
       FROM naver_bookings
       WHERE cancel_date2 IS NULL
         AND check_out >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
@@ -3622,6 +3624,9 @@ export const syncNaverBookingsToRooms = async () => {
         product_name: booking.product_name,
 
         qty: booking.qty,
+
+        booking_option: booking.booking_option,
+        request_memo: booking.request_memo,
       });
     }
 
@@ -3703,6 +3708,9 @@ export const syncNaverBookingsToRooms = async () => {
                 product_name: period.product_name,
 
                 qty: period.qty,
+
+                booking_option: period.booking_option,
+                request_memo: period.request_memo,
               });
 
               assigned = true;
@@ -3739,6 +3747,9 @@ export const syncNaverBookingsToRooms = async () => {
                   product_name: period.product_name,
 
                   qty: period.qty,
+
+                  booking_option: period.booking_option,
+                  request_memo: period.request_memo,
                 });
 
                 assigned = true;
@@ -3783,6 +3794,10 @@ export const syncNaverBookingsToRooms = async () => {
             price: s.price,
             qty: s.qty,
             product_name: s.product_name,
+
+            booking_option: s.booking_option,
+            request_memo: s.request_memo,
+
             check_in: s.check_in,
             check_out: s.check_out,
           };
@@ -3934,18 +3949,29 @@ export const syncNaverBookingsToRooms = async () => {
               schedule.map((s) => ({
                 check_in: s.check_in,
                 check_out: s.check_out,
+
                 source: s.source,
+
+                booking_option: s.booking_option,
+                request_memo: s.request_memo,
               })),
             ),
 
             JSON.stringify(
               schedule.map((s) => ({
                 booking_id: s.booking_id,
+
                 name: s.name,
                 phone: s.phone,
+
                 product_name: s.product_name,
+
                 qty: s.qty,
                 price: s.price,
+
+                booking_option: s.booking_option,
+                request_memo: s.request_memo,
+
                 check_in: s.check_in,
                 check_out: s.check_out,
               })),
