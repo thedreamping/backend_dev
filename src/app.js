@@ -202,7 +202,7 @@ app.put("/api/refund-info/:id", verifyToken, async (req, res) => {
       SET per = ?
       WHERE id = ?
       `,
-      [numericChanged, id]
+      [numericChanged, id],
     );
 
     if (result.affectedRows === 0) {
@@ -216,7 +216,6 @@ app.put("/api/refund-info/:id", verifyToken, async (req, res) => {
       ok: true,
       message: "환불 정책 수정 완료",
     });
-
   } catch (error) {
     console.error("refund_info update error:", error);
 
@@ -375,7 +374,6 @@ app.post("/api/options_all_change", verifyToken, async (req, res) => {
     });
   }
 });
-
 
 app.post("/api/options", verifyToken, async (req, res) => {
   try {
@@ -1204,7 +1202,7 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
 
       await conn.query(
         `DELETE FROM room_price WHERE date IN (${placeholders})`,
-        dates
+        dates,
       );
 
       // 🔥 새로 INSERT
@@ -1214,7 +1212,7 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
         (room_group_id, date, price, room_group_name)
         VALUES ?
         `,
-        [insertValues]
+        [insertValues],
       );
 
       await conn.commit();
@@ -1223,14 +1221,12 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
         ok: true,
         message: "날짜 기준 전체 덮어쓰기 완료",
       });
-
     } catch (err) {
       await conn.rollback();
       throw err;
     } finally {
       conn.release();
     }
-
   } catch (error) {
     console.error("room_price replace error:", error);
     return res.status(500).json({
@@ -1239,7 +1235,6 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
     });
   }
 });
-
 
 app.get("/api/room-price", async (req, res) => {
   try {
@@ -1317,7 +1312,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       disable_end,
       manual_booking,
       cancel_booking,
-      soogie
+      soogie,
     } = req.body;
 
     // =================================================
@@ -1408,7 +1403,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       `SELECT room_group_id, is_ota, check_in_and_out_soogie
        FROM room
        WHERE id = ?`,
-      [id]
+      [id],
     );
 
     if (roomRows.length === 0) {
@@ -1464,9 +1459,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     const finalCheckOut = finalEnd;
     const finalSoogie = finalSoogieSchedule.length > 0 ? 1 : 0;
     const finalSoogieText =
-          finalSoogieSchedule.length > 0
-            ? (soogie || null)
-            : null;
+      finalSoogieSchedule.length > 0 ? soogie || null : null;
     const finalIsActive =
       finalSoogieSchedule.length > 0 ? 0 : Number(is_active);
 
@@ -1484,7 +1477,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           lodgement = ?
       WHERE room_group_id = ?
       `,
-      [numericMax, numericMin, finalDayUse, lodgement, roomGroupId]
+      [numericMax, numericMin, finalDayUse, lodgement, roomGroupId],
     );
 
     // =================================================
@@ -1519,14 +1512,13 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         JSON.stringify(finalSoogieSchedule),
         finalSoogieText || null,
         id,
-      ]
+      ],
     );
 
     return res.json({
       ok: true,
       message: "객실 정보 수정 완료",
     });
-
   } catch (error) {
     console.error("room update error:", error);
     return res.status(500).json({
@@ -1536,7 +1528,6 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
   }
 });
 
-
 app.put("/api/room-group/:id", verifyToken, async (req, res) => {
   const connection = await pool.getConnection();
 
@@ -1544,13 +1535,7 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
     await connection.beginTransaction();
 
     const { id } = req.params;
-    const {
-      name,
-      is_active,
-      reason,
-      disable_start,
-      disable_end,
-    } = req.body;
+    const { name, is_active, reason, disable_start, disable_end } = req.body;
 
     // ✅ 필수값 체크
     if (!name || typeof is_active === "undefined") {
@@ -1588,14 +1573,11 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
       }
     }
 
-    const finalReason =
-      Number(is_active) === 1 ? null : reason.trim();
+    const finalReason = Number(is_active) === 1 ? null : reason.trim();
 
-    const finalStart =
-      Number(is_active) === 1 ? null : disable_start;
+    const finalStart = Number(is_active) === 1 ? null : disable_start;
 
-    const finalEnd =
-      Number(is_active) === 1 ? null : disable_end;
+    const finalEnd = Number(is_active) === 1 ? null : disable_end;
 
     // 1️⃣ 그룹 업데이트
     const [result] = await connection.query(
@@ -1609,14 +1591,7 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
         disable_end = ?
       WHERE id = ?
       `,
-      [
-        name,
-        Number(is_active),
-        finalReason,
-        finalStart,
-        finalEnd,
-        id,
-      ]
+      [name, Number(is_active), finalReason, finalStart, finalEnd, id],
     );
 
     if (result.affectedRows === 0) {
@@ -1641,7 +1616,7 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
           disable_end = ?
         WHERE room_group_id = ?
         `,
-        [finalStart, finalEnd, id]
+        [finalStart, finalEnd, id],
       );
     }
 
@@ -1657,7 +1632,7 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
           disable_end = NULL
         WHERE room_group_id = ?
         `,
-        [id]
+        [id],
       );
     }
 
@@ -1667,7 +1642,6 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
       ok: true,
       message: "객실 그룹 수정 완료",
     });
-
   } catch (error) {
     await connection.rollback();
     console.error("room_group update error:", error);
@@ -1686,13 +1660,7 @@ app.put("/api/rooms/bulk-update", verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const {
-      ids,
-      is_active,
-      reason,
-      disable_start,
-      disable_end,
-    } = req.body;
+    const { ids, is_active, reason, disable_start, disable_end } = req.body;
 
     // 🔹 기본 검증
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -1730,14 +1698,11 @@ app.put("/api/rooms/bulk-update", verifyToken, async (req, res) => {
       }
     }
 
-    const finalReason =
-      Number(is_active) === 1 ? null : reason.trim();
+    const finalReason = Number(is_active) === 1 ? null : reason.trim();
 
-    const finalStart =
-      Number(is_active) === 1 ? null : disable_start;
+    const finalStart = Number(is_active) === 1 ? null : disable_start;
 
-    const finalEnd =
-      Number(is_active) === 1 ? null : disable_end;
+    const finalEnd = Number(is_active) === 1 ? null : disable_end;
 
     // 🔹 IN 절용 placeholder 생성
     const placeholders = ids.map(() => "?").join(",");
@@ -1754,13 +1719,7 @@ app.put("/api/rooms/bulk-update", verifyToken, async (req, res) => {
         is_soogie = 1
       WHERE id IN (${placeholders})
       `,
-      [
-        Number(is_active),
-        finalReason,
-        finalStart,
-        finalEnd,
-        ...ids,
-      ]
+      [Number(is_active), finalReason, finalStart, finalEnd, ...ids],
     );
 
     await connection.commit();
@@ -1769,7 +1728,6 @@ app.put("/api/rooms/bulk-update", verifyToken, async (req, res) => {
       ok: true,
       message: `${result.affectedRows}개 객실 수정 완료`,
     });
-
   } catch (error) {
     await connection.rollback();
     console.error("bulk room update error:", error);
@@ -1956,9 +1914,7 @@ app.post("/api/room", verifyToken, async (req, res) => {
     }
 
     const finalDescription =
-      description && description.trim() !== ""
-        ? description.trim()
-        : null;
+      description && description.trim() !== "" ? description.trim() : null;
 
     // =================================================
     // 3️⃣ INSERT
@@ -1988,7 +1944,7 @@ app.post("/api/room", verifyToken, async (req, res) => {
         room_group_id,
         finalDayUse,
         lodgement,
-      ]
+      ],
     );
 
     return res.json({
@@ -1996,7 +1952,6 @@ app.post("/api/room", verifyToken, async (req, res) => {
       message: "객실 생성 완료",
       id: result.insertId,
     });
-
   } catch (error) {
     console.error("room create error:", error);
 
@@ -2176,7 +2131,6 @@ app.post("/api/payment/ready", async (req, res) => {
   }
 });
 
-
 app.post("/api/payment/return", async (req, res) => {
   const conn = await pool.getConnection();
 
@@ -2222,39 +2176,52 @@ app.post("/api/payment/return", async (req, res) => {
       await conn.rollback();
       return res.json({
         ok: false,
-        message: "auth 정보 없음"
+        message: "auth 정보 없음",
       });
     }
 
-      const timestamp = new Date().getTime(); 
-    const signKey = process.env.INICIS_SIGN_KEY
+    const timestamp = new Date().getTime();
+    const signKey = process.env.INICIS_SIGN_KEY;
     // mid fallback
     mid = mid || "cafe246818";
-    const signature  = crypto.createHash("sha256").update("authToken="+authToken+"&timestamp="+timestamp).digest('hex');
-    const verification  = crypto.createHash("sha256").update("authToken="+authToken+"&signKey="+signKey+"&timestamp="+timestamp).digest('hex');
+    const signature = crypto
+      .createHash("sha256")
+      .update("authToken=" + authToken + "&timestamp=" + timestamp)
+      .digest("hex");
+    const verification = crypto
+      .createHash("sha256")
+      .update(
+        "authToken=" +
+          authToken +
+          "&signKey=" +
+          signKey +
+          "&timestamp=" +
+          timestamp,
+      )
+      .digest("hex");
     // =========================
     // 1. 이니시스 승인 요청
     // =========================
-    const format = "JSON"
+    const format = "JSON";
     let response;
     try {
       response = await axios.post(
         authUrl,
         {
-          authToken:req.body.authToken,
-          mid:req.body.mid,
-          charset:req.body.charset,
-          signature:signature,
-          timestamp:timestamp,
-          format:format,
-          verification:verification
+          authToken: req.body.authToken,
+          mid: req.body.mid,
+          charset: req.body.charset,
+          signature: signature,
+          timestamp: timestamp,
+          format: format,
+          verification: verification,
         },
         {
           headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
+            "Content-Type": "application/x-www-form-urlencoded",
           },
-          timeout: 10000
-        }
+          timeout: 10000,
+        },
       );
     } catch (err) {
       await conn.rollback();
@@ -2262,7 +2229,7 @@ app.post("/api/payment/return", async (req, res) => {
 
       return res.json({
         ok: false,
-        message: "이니시스 승인 요청 실패"
+        message: "이니시스 승인 요청 실패",
       });
     }
 
@@ -2279,21 +2246,21 @@ app.post("/api/payment/return", async (req, res) => {
         SET status='CANCELLED', updated_at=NOW()
         WHERE order_id=?
         `,
-        [data.oid]
+        [data.oid],
       );
 
       await conn.commit();
 
       return res.json({
         ok: false,
-        message: data.resultMsg || "결제 승인 실패"
+        message: data.resultMsg || "결제 승인 실패",
       });
     }
 
     // =========================
     // 3. 예약 조회 (락)
     // =========================
-    console.log(data)
+    console.log(data);
     const [rows] = await conn.query(
       `
       SELECT *
@@ -2301,7 +2268,7 @@ app.post("/api/payment/return", async (req, res) => {
       WHERE order_id=?
       FOR UPDATE
       `,
-      [data.MOID]
+      [data.MOID],
     );
 
     if (!rows.length) {
@@ -2309,7 +2276,7 @@ app.post("/api/payment/return", async (req, res) => {
 
       return res.json({
         ok: false,
-        message: "예약 없음"
+        message: "예약 없음",
       });
     }
 
@@ -2325,14 +2292,14 @@ app.post("/api/payment/return", async (req, res) => {
         SET status='CANCELLED'
         WHERE id=?
         `,
-        [reservation.id]
+        [reservation.id],
       );
 
       await conn.commit();
 
       return res.json({
         ok: false,
-        message: "금액 불일치"
+        message: "금액 불일치",
       });
     }
 
@@ -2344,7 +2311,7 @@ app.post("/api/payment/return", async (req, res) => {
 
       return res.json({
         ok: true,
-        message: "이미 처리됨"
+        message: "이미 처리됨",
       });
     }
 
@@ -2358,7 +2325,7 @@ app.post("/api/payment/return", async (req, res) => {
       WHERE room_group_id=?
       ORDER BY id ASC
       `,
-      [reservation.room_group_id]
+      [reservation.room_group_id],
     );
 
     let assignedRoomId = null;
@@ -2366,13 +2333,7 @@ app.post("/api/payment/return", async (req, res) => {
     for (const room of rooms) {
       const schedules = getAllSchedules(room);
 
-      if (
-        !isOverlap(
-          schedules,
-          reservation.check_in,
-          reservation.check_out
-        )
-      ) {
+      if (!isOverlap(schedules, reservation.check_in, reservation.check_out)) {
         assignedRoomId = room.id;
         break;
       }
@@ -2383,7 +2344,7 @@ app.post("/api/payment/return", async (req, res) => {
 
       return res.json({
         ok: false,
-        message: "배정 가능한 객실 없음"
+        message: "배정 가능한 객실 없음",
       });
     }
 
@@ -2412,8 +2373,8 @@ app.post("/api/payment/return", async (req, res) => {
         reservation.check_out,
         reservation.check_in,
         reservation.check_out,
-        assignedRoomId
-      ]
+        assignedRoomId,
+      ],
     );
 
     // =========================
@@ -2429,14 +2390,14 @@ app.post("/api/payment/return", async (req, res) => {
         updated_at=NOW()
       WHERE id=?
       `,
-      [assignedRoomId, data.tid, reservation.id]
+      [assignedRoomId, data.tid, reservation.id],
     );
 
     await conn.commit();
 
     return res.json({
       ok: true,
-      message: "결제 성공"
+      message: "결제 성공",
     });
   } catch (error) {
     await conn.rollback();
@@ -2445,124 +2406,96 @@ app.post("/api/payment/return", async (req, res) => {
 
     return res.json({
       ok: false,
-      message: error.message || "서버 오류"
+      message: error.message || "서버 오류",
     });
   } finally {
     conn.release();
   }
 });
 
-
-
 // ======================================================
 // 모바일 이니시스 결제 시작
 // ======================================================
-app.get(
-  "/api/payment/mobile/start/:reservationId",
-  async (req, res) => {
+app.get("/api/payment/mobile/start/:reservationId", async (req, res) => {
+  try {
+    const reservationId = req.params.reservationId;
 
-    try {
+    if (!reservationId) {
+      return res.status(400).send("reservationId 없음");
+    }
 
-      const reservationId =
-        req.params.reservationId;
-
-      if (!reservationId) {
-
-        return res.status(400).send("reservationId 없음");
-
-      }
-
-      // =========================
-      // 예약 조회
-      // =========================
-      const [rows] = await pool.query(
-        `
+    // =========================
+    // 예약 조회
+    // =========================
+    const [rows] = await pool.query(
+      `
         SELECT *
         FROM reservations_info
         WHERE id = ?
         `,
-        [reservationId]
-      );
+      [reservationId],
+    );
 
-      if (!rows.length) {
+    if (!rows.length) {
+      return res.status(404).send("예약 없음");
+    }
 
-        return res.status(404).send("예약 없음");
+    const reservation = rows[0];
 
-      }
+    if (reservation.status !== "PENDING") {
+      return res.send("이미 처리된 예약");
+    }
 
-      const reservation = rows[0];
+    // =========================
+    // 모바일용 주문번호
+    // =========================
+    const mid = "cafe246818";
+    const oid = `${mid}_${Date.now()}`;
 
-      if (reservation.status !== "PENDING") {
-
-        return res.send("이미 처리된 예약");
-
-      }
-
-      // =========================
-      // 모바일용 주문번호
-      // =========================
-      const mid = "cafe246818";
-      const oid =
-        `${mid}_${Date.now()}`;
-
-      // =========================
-      // DB 저장
-      // =========================
-      await pool.query(
-        `
+    // =========================
+    // DB 저장
+    // =========================
+    await pool.query(
+      `
         UPDATE reservations_info
         SET
           order_id = ?,
           updated_at = NOW()
         WHERE id = ?
         `,
-        [
-          oid,
-          reservation.id
-        ]
-      );
+      [oid, reservation.id],
+    );
 
-      // =========================
-      // 이니시스 설정
-      // =========================
-      
+    // =========================
+    // 이니시스 설정
+    // =========================
 
-      const signKey =
-        process.env.INICIS_SIGN_KEY;
+    const signKey = process.env.INICIS_SIGN_KEY;
 
-      const price =
-        String(
-          Number(reservation.total_amount)
-        );
+    const price = String(Number(reservation.total_amount));
 
-      const timestamp =
-        Date.now();
+    const timestamp = Date.now();
 
-      // =========================
-      // 모바일 SHA512
-      // =========================
-      const hashString =
-        price +
-        oid +
-        timestamp +
-        signKey;
+    // =========================
+    // 모바일 SHA512
+    // =========================
+    const hashString = price + oid + timestamp + signKey;
 
-      const P_CHKFAKE =
-        crypto
-          .createHash("sha512")
-          .update(hashString, "utf8")
-          .digest("base64");
+    const P_CHKFAKE = crypto
+      .createHash("sha512")
+      .update(hashString, "utf8")
+      .digest("base64");
 
-      // =========================
-      // NEXT_URL
-      // =========================
-      const nextUrl =
-        "https://dreampingback.duckdns.org:4000/api/payment/mobile/return";
+    // =========================
+    // NEXT_URL
+    // =========================
+    const nextUrl =
+      "https://dreampingback.duckdns.org:4000/api/payment/mobile/return";
 
-      // =========================
-      // 모바일 자동 submit 페이지
-      // =========================
-      return res.send(`
+    // =========================
+    // 모바일 자동 submit 페이지
+    // =========================
+    return res.send(`
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -2674,471 +2607,305 @@ document.mobileweb.submit();
 </body>
 </html>
       `);
-    console.log("이거 확인",P_CHKFAKE)    
-    } catch (error) {
+    console.log("이거 확인", P_CHKFAKE);
+  } catch (error) {
+    console.error("mobile start error:", error);
 
-      console.error(
-        "mobile start error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .send("모바일 결제 시작 실패");
-
-    }
-
+    return res.status(500).send("모바일 결제 시작 실패");
   }
-);
-
+});
 
 // ======================================================
 // 모바일 이니시스 RETURN
 // ======================================================
 
-app.post(
-  "/api/payment/mobile/return",
-  async (req, res) => {
+app.post("/api/payment/mobile/return", async (req, res) => {
+  const conn = await pool.getConnection();
 
-    const conn =
-      await pool.getConnection();
-
-    const getAllSchedules = (room) => {
-
-      let naver = [];
-      let soogie = [];
-
-      try {
-
-        naver =
-          typeof room.check_in_and_out === "string"
-            ? JSON.parse(room.check_in_and_out)
-            : room.check_in_and_out || [];
-
-      } catch {
-
-        naver = [];
-
-      }
-
-      try {
-
-        soogie =
-          typeof room.check_in_and_out_soogie === "string"
-            ? JSON.parse(room.check_in_and_out_soogie)
-            : room.check_in_and_out_soogie || [];
-
-      } catch {
-
-        soogie = [];
-
-      }
-
-      return [...naver, ...soogie];
-
-    };
-
-    const isOverlap = (
-      list,
-      start,
-      end
-    ) => {
-
-      return list.some((s) => {
-
-        return (
-          start <= s.check_out &&
-          s.check_in <= end
-        );
-
-      });
-
-    };
+  const getAllSchedules = (room) => {
+    let naver = [];
+    let soogie = [];
 
     try {
+      naver =
+        typeof room.check_in_and_out === "string"
+          ? JSON.parse(room.check_in_and_out)
+          : room.check_in_and_out || [];
+    } catch {
+      naver = [];
+    }
 
-      await conn.beginTransaction();
+    try {
+      soogie =
+        typeof room.check_in_and_out_soogie === "string"
+          ? JSON.parse(room.check_in_and_out_soogie)
+          : room.check_in_and_out_soogie || [];
+    } catch {
+      soogie = [];
+    }
 
-      console.log(
-        "mobile return body:",
-        req.body
+    return [...naver, ...soogie];
+  };
+
+  const isOverlap = (list, start, end) => {
+    return list.some((s) => {
+      return start <= s.check_out && s.check_in <= end;
+    });
+  };
+
+  try {
+    await conn.beginTransaction();
+
+    console.log("mobile return body:", req.body);
+
+    // =========================
+    // 1. 인증 실패
+    // =========================
+    if (req.body.P_STATUS !== "00") {
+      await conn.rollback();
+
+      return res.redirect(
+        "https://dreamping.co.kr/shopinfo/payment-cancel.html",
       );
+    }
 
-      // =========================
-      // 1. 인증 실패
-      // =========================
-      if (
-        req.body.P_STATUS !== "00"
-      ) {
+    // =========================
+    // 2. 필수값
+    // =========================
+    const P_TID = req.body.P_TID;
 
+    const P_AMT = req.body.P_AMT;
+
+    const P_NOTI = req.body.P_NOTI;
+
+    const idc_name = req.body.idc_name;
+
+    const P_REQ_URL = req.body.P_REQ_URL;
+
+    if (!P_TID || !P_AMT || !P_NOTI || !idc_name || !P_REQ_URL) {
+      await conn.rollback();
+
+      return res.redirect(
+        "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+      );
+    }
+
+    // =========================
+    // 3. 승인 URL 검증
+    // =========================
+    let authUrl = "";
+
+    switch (idc_name) {
+      case "fc":
+        authUrl = "https://fcmobile.inicis.com/smart/payReq.ini";
+        break;
+
+      case "ks":
+        authUrl = "https://ksmobile.inicis.com/smart/payReq.ini";
+        break;
+
+      case "stg":
+        authUrl = "https://stgmobile.inicis.com/smart/payReq.ini";
+        break;
+
+      default:
         await conn.rollback();
 
         return res.redirect(
-          "https://dreamping.co.kr/shopinfo/payment-cancel.html"
+          "https://dreamping.co.kr/shopinfo/payment-cancel.html",
         );
+    }
 
-      }
+    // 샘플과 동일한 검증
+    if (P_REQ_URL !== authUrl) {
+      console.log("P_REQ_URL mismatch:", P_REQ_URL, authUrl);
 
-      // =========================
-      // 2. 필수값
-      // =========================
-      const P_TID =
-        req.body.P_TID;
+      await conn.rollback();
 
-      const P_AMT =
-        req.body.P_AMT;
-
-      const P_NOTI =
-        req.body.P_NOTI;
-
-      const idc_name =
-        req.body.idc_name;
-
-      const P_REQ_URL =
-        req.body.P_REQ_URL;
-
-      if (
-        !P_TID ||
-        !P_AMT ||
-        !P_NOTI ||
-        !idc_name ||
-        !P_REQ_URL
-      ) {
-
-        await conn.rollback();
-
-        return res.redirect(
-          "https://dreamping.co.kr/shopinfo/payment-cancel.html"
-        );
-
-      }
-
-      // =========================
-      // 3. 승인 URL 검증
-      // =========================
-      let authUrl = "";
-
-      switch (idc_name) {
-
-        case "fc":
-          authUrl =
-            "https://fcmobile.inicis.com/smart/payReq.ini";
-          break;
-
-        case "ks":
-          authUrl =
-            "https://ksmobile.inicis.com/smart/payReq.ini";
-          break;
-
-        case "stg":
-          authUrl =
-            "https://stgmobile.inicis.com/smart/payReq.ini";
-          break;
-
-        default:
-
-          await conn.rollback();
-
-          return res.redirect(
-            "https://dreamping.co.kr/shopinfo/payment-cancel.html"
-          );
-
-      }
-
-      // 샘플과 동일한 검증
-      if (
-        P_REQ_URL !== authUrl
-      ) {
-
-        console.log(
-          "P_REQ_URL mismatch:",
-          P_REQ_URL,
-          authUrl
-        );
-
-        await conn.rollback();
-
-        return res.redirect(
-          "https://dreamping.co.kr/shopinfo/payment-cancel.html"
-        );
-
-      }
-
-      // =========================
-      // 4. 승인 요청
-      // =========================
-      const params =
-        new URLSearchParams();
-
-      params.append(
-        "P_MID",
-        P_TID.substring(10, 20)
+      return res.redirect(
+        "https://dreamping.co.kr/shopinfo/payment-cancel.html",
       );
+    }
 
-      params.append(
-        "P_TID",
-        P_TID
-      );
+    // =========================
+    // 4. 승인 요청
+    // =========================
+    const params = new URLSearchParams();
 
-      const authResponse =
-        await axios.post(
-          authUrl,
-          params.toString(),
-          {
-            headers: {
-              "Content-Type":
-                "application/x-www-form-urlencoded"
-            },
-            timeout: 10000
-          }
-        );
+    params.append("P_MID", P_TID.substring(10, 20));
 
-      // =========================
-      // 5. 응답 파싱
-      // =========================
-      const result = {};
+    params.append("P_TID", P_TID);
 
-      String(authResponse.data)
-        .split("&")
-        .forEach(item => {
+    const authResponse = await axios.post(authUrl, params.toString(), {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      timeout: 10000,
+    });
 
-          const idx =
-            item.indexOf("=");
+    // =========================
+    // 5. 응답 파싱
+    // =========================
+    const result = {};
 
-          if (idx > -1) {
+    String(authResponse.data)
+      .split("&")
+      .forEach((item) => {
+        const idx = item.indexOf("=");
 
-            const key =
-              item.substring(0, idx);
+        if (idx > -1) {
+          const key = item.substring(0, idx);
 
-            const value =
-              decodeURIComponent(
-                item.substring(idx + 1)
-              );
+          const value = decodeURIComponent(item.substring(idx + 1));
 
-            result[key] = value;
+          result[key] = value;
+        }
+      });
 
-          }
+    console.log("mobile auth result:", result);
 
-        });
-
-      console.log(
-        "mobile auth result:",
-        result
-      );
-
-      // =========================
-      // 6. 승인 실패
-      // =========================
-      if (
-        result.P_STATUS !== "00"
-      ) {
-
-        await conn.query(
-          `
+    // =========================
+    // 6. 승인 실패
+    // =========================
+    if (result.P_STATUS !== "00") {
+      await conn.query(
+        `
           UPDATE reservations_info
           SET
             status='CANCELLED',
             updated_at=NOW()
           WHERE order_id=?
           `,
-          [result.P_OID]
-        );
+        [result.P_OID],
+      );
 
-        await conn.commit();
+      await conn.commit();
 
-        return res.redirect(
-          "https://dreamping.co.kr/shopinfo/payment-cancel.html"
-        );
+      return res.redirect(
+        "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+      );
+    }
 
-      }
+    // =========================
+    // 7. 예약 조회
+    // =========================
 
-      // =========================
-      // 7. 예약 조회
-      // =========================
-    
-      const [rows] =
-        await conn.query(
-          `
+    const [rows] = await conn.query(
+      `
           SELECT *
           FROM reservations_info
           WHERE order_id=?
           FOR UPDATE
           `,
-          [result.P_OID]
-        );
-        
-      if (!rows.length) {
+      [result.P_OID],
+    );
 
-        await conn.rollback();
+    if (!rows.length) {
+      await conn.rollback();
 
-        return res.send(
-          "예약 없음"
-        );
+      return res.send("예약 없음");
+    }
 
-      }
+    const reservation = rows[0];
 
-      const reservation =
-        rows[0];
+    // =========================
+    // 8. 중복 방지
+    // =========================
+    if (reservation.status === "PAID") {
+      await conn.rollback();
 
-      // =========================
-      // 8. 중복 방지
-      // =========================
-      if (
-        reservation.status === "PAID"
-      ) {
+      return res.redirect(
+        "https://dreamping.co.kr/shopinfo/payment-success.html",
+      );
+    }
 
-        await conn.rollback();
-
-        return res.redirect(
-          "https://dreamping.co.kr/shopinfo/payment-success.html"
-        );
-
-      }
-
-      // =========================
-      // 9. 금액 검증
-      // =========================
-      if (
-        Number(
-          reservation.total_amount
-        ) !==
-        Number(result.P_AMT)
-      ) {
-
-        await conn.query(
-          `
+    // =========================
+    // 9. 금액 검증
+    // =========================
+    if (Number(reservation.total_amount) !== Number(result.P_AMT)) {
+      await conn.query(
+        `
           UPDATE reservations_info
           SET
             status='CANCELLED',
             updated_at=NOW()
           WHERE id=?
           `,
-          [reservation.id]
-        );
+        [reservation.id],
+      );
 
-        await conn.commit();
+      await conn.commit();
 
-        return res.send(
-          "금액 불일치"
-        );
+      return res.send("금액 불일치");
+    }
 
-      }
-
-      // =========================
-      // 10. 객실 조회
-      // =========================
-      const [rooms] =
-        await conn.query(
-          `
+    // =========================
+    // 10. 객실 조회
+    // =========================
+    const [rooms] = await conn.query(
+      `
           SELECT *
           FROM room
           WHERE room_group_id=?
           ORDER BY id ASC
           `,
-          [
-            reservation.room_group_id
-          ]
+      [reservation.room_group_id],
+    );
+
+    let assignedRoomId = null;
+
+    for (const room of rooms) {
+      const schedules = getAllSchedules(room);
+
+      if (!isOverlap(schedules, reservation.check_in, reservation.check_out)) {
+        assignedRoomId = room.id;
+
+        break;
+      }
+    }
+
+    // =========================
+    // 11. 객실 없음
+    // =========================
+    if (!assignedRoomId) {
+      // 망취소 권장
+      try {
+        const cancelUrl = authUrl.replace(
+          "/smart/payReq.ini",
+          "/smart/payNetCancel.ini",
         );
 
-      let assignedRoomId =
-        null;
+        const cancelParams = new URLSearchParams();
 
-      for (const room of rooms) {
+        cancelParams.append("P_TID", P_TID);
 
-        const schedules =
-          getAllSchedules(room);
+        cancelParams.append("P_MID", P_TID.substring(10, 20));
 
-        if (
-          !isOverlap(
-            schedules,
-            reservation.check_in,
-            reservation.check_out
-          )
-        ) {
+        cancelParams.append("P_AMT", P_AMT);
 
-          assignedRoomId =
-            room.id;
+        cancelParams.append("P_OID", P_NOTI);
 
-          break;
+        await axios.post(cancelUrl, cancelParams.toString(), {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+        });
 
-        }
-
+        console.log("망취소 완료");
+      } catch (cancelError) {
+        console.error("망취소 실패:", cancelError);
       }
 
-      // =========================
-      // 11. 객실 없음
-      // =========================
-      if (!assignedRoomId) {
+      await conn.rollback();
 
-        // 망취소 권장
-        try {
+      return res.send("배정 가능한 객실 없음");
+    }
 
-          const cancelUrl =
-            authUrl.replace(
-              "/smart/payReq.ini",
-              "/smart/payNetCancel.ini"
-            );
-
-          const cancelParams =
-            new URLSearchParams();
-
-          cancelParams.append(
-            "P_TID",
-            P_TID
-          );
-
-          cancelParams.append(
-            "P_MID",
-            P_TID.substring(10, 20)
-          );
-
-          cancelParams.append(
-            "P_AMT",
-            P_AMT
-          );
-
-          cancelParams.append(
-            "P_OID",
-            P_NOTI
-          );
-
-          await axios.post(
-            cancelUrl,
-            cancelParams.toString(),
-            {
-              headers: {
-                "Content-Type":
-                  "application/x-www-form-urlencoded"
-              }
-            }
-          );
-
-          console.log(
-            "망취소 완료"
-          );
-
-        } catch (cancelError) {
-
-          console.error(
-            "망취소 실패:",
-            cancelError
-          );
-
-        }
-
-        await conn.rollback();
-
-        return res.send(
-          "배정 가능한 객실 없음"
-        );
-
-      }
-
-      // =========================
-      // 12. room 업데이트
-      // =========================
-      await conn.query(
-        `
+    // =========================
+    // 12. room 업데이트
+    // =========================
+    await conn.query(
+      `
         UPDATE room
         SET
           check_in=?,
@@ -3157,20 +2924,20 @@ app.post(
           )
         WHERE id=?
         `,
-        [
-          reservation.check_in,
-          reservation.check_out,
-          reservation.check_in,
-          reservation.check_out,
-          assignedRoomId
-        ]
-      );
+      [
+        reservation.check_in,
+        reservation.check_out,
+        reservation.check_in,
+        reservation.check_out,
+        assignedRoomId,
+      ],
+    );
 
-      // =========================
-      // 13. 예약 완료
-      // =========================
-      await conn.query(
-        `
+    // =========================
+    // 13. 예약 완료
+    // =========================
+    await conn.query(
+      `
         UPDATE reservations_info
         SET
           status='PAID',
@@ -3179,46 +2946,27 @@ app.post(
           updated_at=NOW()
         WHERE id=?
         `,
-        [
-          assignedRoomId,
-          result.P_TID,
-          reservation.id
-        ]
-      );
+      [assignedRoomId, result.P_TID, reservation.id],
+    );
 
-      await conn.commit();
+    await conn.commit();
 
-      // =========================
-      // 14. 성공 이동
-      // =========================
-      return res.redirect(
-        "https://dreamping.co.kr/shopinfo/payment-success.html"
-      );
+    // =========================
+    // 14. 성공 이동
+    // =========================
+    return res.redirect(
+      "https://dreamping.co.kr/shopinfo/payment-success.html",
+    );
+  } catch (error) {
+    await conn.rollback();
 
-    } catch (error) {
+    console.error("mobile return error:", error);
 
-      await conn.rollback();
-
-      console.error(
-        "mobile return error:",
-        error
-      );
-
-      return res.redirect(
-        "https://dreamping.co.kr/shopinfo/payment-cancel.html"
-      );
-
-    } finally {
-
-      conn.release();
-
-    }
-
+    return res.redirect("https://dreamping.co.kr/shopinfo/payment-cancel.html");
+  } finally {
+    conn.release();
   }
-);
-
-
-
+});
 
 app.post("/api/dk_schedule", verifyToken, async (req, res) => {
   try {
@@ -3343,10 +3091,7 @@ app.post("/api/logs", verifyToken, async (req, res) => {
       });
     }
 
-    const ip =
-      req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-
-
+    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
 
     await pool.query(
       `
@@ -3389,7 +3134,7 @@ app.get("/api/logs", verifyToken, async (req, res) => {
       ORDER BY id DESC
       LIMIT ? OFFSET ?
       `,
-      [limit, offset]
+      [limit, offset],
     );
 
     return res.json({
@@ -3402,17 +3147,14 @@ app.get("/api/logs", verifyToken, async (req, res) => {
         totalPages: Math.ceil(total / limit),
       },
     });
-
   } catch (error) {
     console.error("log get error:", error);
     return res.status(500).json({ ok: false });
   }
 });
 
-
 app.post("/api/naver-status", async (req, res) => {
   try {
-  
     const { action } = req.body;
 
     // 🔎 필수값 체크
@@ -3438,7 +3180,7 @@ app.post("/api/naver-status", async (req, res) => {
       INSERT INTO naver_sync_log (action)
       VALUES (?)
       `,
-      [action]
+      [action],
     );
 
     return res.json({
@@ -3476,12 +3218,141 @@ app.get("/api/naver-status", async (req, res) => {
       ok: true,
       data: rows[0],
     });
-
   } catch (error) {
     console.error("naver-status get error:", error);
     return res.status(500).json({
       ok: false,
       message: "상태 조회 중 오류 발생",
+    });
+  }
+});
+
+app.get("/api/reservation_history", async (req, res) => {
+  try {
+    let {
+      page = 1,
+      limit = 20,
+
+      guest_name = "",
+      guest_phone = "",
+      memo = "",
+    } = req.query;
+
+    page = Number(page) || 1;
+    limit = Number(limit) || 20;
+
+    if (limit > 100) {
+      limit = 100;
+    }
+
+    const offset = (page - 1) * limit;
+
+    // =====================================================
+    // WHERE 조건
+    // =====================================================
+
+    const where = [];
+    const params = [];
+
+    if (guest_name) {
+      where.push(`guest_name LIKE ?`);
+
+      params.push(`%${guest_name}%`);
+    }
+
+    if (guest_phone) {
+      where.push(`guest_phone LIKE ?`);
+
+      params.push(`%${guest_phone}%`);
+    }
+
+    if (memo) {
+      where.push(`memo LIKE ?`);
+
+      params.push(`%${memo}%`);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    // =====================================================
+    // total count
+    // =====================================================
+
+    const [countRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM room_booking_history
+      ${whereSql}
+    `,
+      params,
+    );
+
+    const total = countRows[0]?.total || 0;
+
+    // =====================================================
+    // 목록 조회
+    // =====================================================
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        id,
+
+        booking_id,
+
+        check_in,
+        check_out,
+
+        room_id,
+        room_group_id,
+
+        source,
+
+        guest_name,
+        guest_phone,
+
+        qty,
+        price,
+
+        product_name,
+
+        memo,
+
+        canceled,
+
+        payload,
+
+        created_at
+      FROM room_booking_history
+      ${whereSql}
+      ORDER BY id DESC
+      LIMIT ?
+      OFFSET ?
+    `,
+      [...params, limit, offset],
+    );
+
+    // =====================================================
+    // 응답
+    // =====================================================
+
+    res.json({
+      ok: true,
+
+      page,
+      limit,
+
+      total,
+      totalPage: Math.ceil(total / limit),
+
+      list: rows,
+    });
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      ok: false,
+      message: "reservation_history 조회 실패",
     });
   }
 });
@@ -3493,12 +3364,17 @@ export const syncNaverBookingsToRooms = async () => {
     await conn.beginTransaction();
 
     console.log("🟡 [SYNC] 시작", new Date().toISOString());
-     const toKSTDate = (date) =>
+
+    const toKSTDate = (date) =>
       new Intl.DateTimeFormat("sv-SE", {
         timeZone: "Asia/Seoul",
       }).format(new Date(date));
 
     const today = toKSTDate(new Date());
+
+    // =====================================================
+    // 수기 예약 정리
+    // =====================================================
 
     const [manualRooms] = await conn.query(`
       SELECT id, check_in_and_out_soogie
@@ -3517,30 +3393,27 @@ export const syncNaverBookingsToRooms = async () => {
         schedules = [];
       }
 
-      const filtered = schedules.filter(
-        (s) => s.check_out >= today
-      );
+      const filtered = schedules.filter((s) => s.check_out >= today);
 
-      await conn.query(`
+      await conn.query(
+        `
         UPDATE room
         SET
           check_in_and_out_soogie = ?,
           is_soogie = ?
         WHERE id = ?
-      `, [
-        JSON.stringify(filtered),
-        filtered.length ? 1 : 0,
-        room.id
-      ]);
+      `,
+        [JSON.stringify(filtered), filtered.length ? 1 : 0, room.id],
+      );
     }
 
-   
+    // =====================================================
+    // normalize
+    // =====================================================
 
     const normalize = (str) =>
-      (str || "")
-        .replace(/[^가-힣a-zA-Z0-9]/g, "")
-        .toLowerCase();
-    
+      (str || "").replace(/[^가-힣a-zA-Z0-9]/g, "").toLowerCase();
+
     const normalizeProduct = (str) => {
       const normalized = normalize(str);
 
@@ -3552,12 +3425,17 @@ export const syncNaverBookingsToRooms = async () => {
     };
 
     // =====================================================
-    // 0️⃣ 초기화
+    // room_group 초기화
     // =====================================================
+
     await conn.query(`
       UPDATE room_group
       SET check_in_and_out = JSON_ARRAY()
     `);
+
+    // =====================================================
+    // room 초기화
+    // =====================================================
 
     await conn.query(`
       UPDATE room
@@ -3578,8 +3456,9 @@ export const syncNaverBookingsToRooms = async () => {
     `);
 
     // =====================================================
-    // 1️⃣ 그룹 조회
+    // 그룹 조회
     // =====================================================
+
     const [groups] = await conn.query(`
       SELECT id, name
       FROM room_group
@@ -3587,8 +3466,9 @@ export const syncNaverBookingsToRooms = async () => {
     `);
 
     // =====================================================
-    // 2️⃣ 예약 조회
+    // 예약 조회
     // =====================================================
+
     const [bookings] = await conn.query(`
       SELECT
         booking_id,
@@ -3605,17 +3485,28 @@ export const syncNaverBookingsToRooms = async () => {
       ORDER BY check_in ASC, created_at ASC
     `);
 
+    // =====================================================
+    // 살아있는 booking_id 목록
+    // =====================================================
+
+    const aliveBookingIds = new Set(bookings.map((b) => String(b.booking_id)));
+
     const groupedDates = {};
 
     for (const group of groups) {
       groupedDates[group.id] = [];
     }
 
+    // =====================================================
+    // 그룹 매핑
+    // =====================================================
+
     for (const booking of bookings) {
       const product = normalizeProduct(booking.product_name);
 
       const group = groups.find((g) => {
         const gname = normalize(g.name);
+
         return product.includes(gname) || gname.includes(product);
       });
 
@@ -3626,40 +3517,48 @@ export const syncNaverBookingsToRooms = async () => {
         check_out: toKSTDate(booking.check_out),
 
         booking_id: booking.booking_id,
+
         name: booking.name,
         phone: booking.phone,
+
         price: booking.price,
         product_name: booking.product_name,
-        qty: booking.qty
+
+        qty: booking.qty,
       });
     }
 
     // =====================================================
-    // 3️⃣ room_group 저장
+    // room_group 저장
     // =====================================================
+
     for (const groupId in groupedDates) {
-      await conn.query(`
+      await conn.query(
+        `
         UPDATE room_group
         SET check_in_and_out = ?
         WHERE id = ?
-      `, [
-        JSON.stringify(groupedDates[groupId]),
-        groupId
-      ]);
+      `,
+        [JSON.stringify(groupedDates[groupId]), groupId],
+      );
     }
 
     // =====================================================
-    // 4️⃣ room 배정
+    // room 배정
     // =====================================================
+
     for (const groupId in groupedDates) {
       const periods = groupedDates[groupId];
 
-      const [rooms] = await conn.query(`
+      const [rooms] = await conn.query(
+        `
         SELECT id
         FROM room
         WHERE room_group_id = ?
         ORDER BY id ASC
-      `, [groupId]);
+      `,
+        [groupId],
+      );
 
       const roomSchedules = new Map();
 
@@ -3667,114 +3566,253 @@ export const syncNaverBookingsToRooms = async () => {
         roomSchedules.set(room.id, []);
       }
 
+      // =====================================================
       // 예약 배정
+      // =====================================================
+
       for (const period of periods) {
         const start = period.check_in;
         const end = period.check_out;
 
         const qty = Number(period.qty) || 1;
 
-        let assignedCount = 0;
-
         for (let q = 0; q < qty; q++) {
-
           let assigned = false;
+
+          // =====================================================
+          // 일반 배정
+          // =====================================================
 
           for (const room of rooms) {
             const schedule = roomSchedules.get(room.id);
 
-            // 1차 : 일반 체크
-            const strictOverlap = schedule.some((s) =>
-              start <= s.check_out &&
-              s.check_in <= end
+            const strictOverlap = schedule.some(
+              (s) => start <= s.check_out && s.check_in <= end,
             );
 
-            // 일반 체크 통과
             if (!strictOverlap) {
-
               schedule.push({
                 check_in: start,
                 check_out: end,
+
                 source: "naver",
 
                 booking_id: period.booking_id,
+
                 name: period.name,
                 phone: period.phone,
+
                 price: period.price,
                 product_name: period.product_name,
-                qty: period.qty
+
+                qty: period.qty,
               });
 
               assigned = true;
-              assignedCount++;
 
               break;
             }
           }
 
+          // =====================================================
+          // 바톤터치 허용
+          // =====================================================
+
           if (!assigned) {
-            // =====================================
-            // 방 부족 시 바톤터치 허용
-            // =====================================
-
             for (const room of rooms) {
-
               const schedule = roomSchedules.get(room.id);
 
-              const relaxedOverlap = schedule.some((s) =>
-                start < s.check_out &&
-                s.check_in < end
+              const relaxedOverlap = schedule.some(
+                (s) => start < s.check_out && s.check_in < end,
               );
 
               if (!relaxedOverlap) {
-
                 schedule.push({
                   check_in: start,
                   check_out: end,
+
                   source: "naver",
 
                   booking_id: period.booking_id,
+
                   name: period.name,
                   phone: period.phone,
+
                   price: period.price,
                   product_name: period.product_name,
-                  qty: period.qty
+
+                  qty: period.qty,
                 });
 
                 assigned = true;
-                assignedCount++;
 
-                console.log(
-                  `[바톤터치 배정] booking_id=${period.booking_id}`
-                );
-                
+                console.log(`[바톤터치 배정] booking_id=${period.booking_id}`);
+
                 break;
               }
             }
           }
+
           if (!assigned) {
             console.warn(
-              `[배정 실패] booking_id=${period.booking_id}, qty=${qty}`
+              `[배정 실패] booking_id=${period.booking_id}, qty=${qty}`,
             );
           }
         }
       }
 
       // =====================================================
-      // 5️⃣ room별 저장
+      // room별 저장
       // =====================================================
+
       for (const room of rooms) {
         const schedule = roomSchedules.get(room.id);
 
         if (!schedule.length) continue;
 
-        schedule.sort((a, b) =>
-          a.check_in.localeCompare(b.check_in)
-        );
+        schedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
 
         const first = schedule[0];
 
-        await conn.query(`
+        // =====================================================
+        // history 저장
+        // =====================================================
+
+        for (const s of schedule) {
+          const payload = {
+            booking_id: s.booking_id,
+            name: s.name,
+            phone: s.phone,
+            price: s.price,
+            qty: s.qty,
+            product_name: s.product_name,
+            check_in: s.check_in,
+            check_out: s.check_out,
+          };
+
+          const [existsRows] = await conn.query(
+            `
+            SELECT id
+            FROM room_booking_history
+            WHERE
+              booking_id = ?
+              AND room_id = ?
+              AND check_in = ?
+              AND check_out = ?
+            LIMIT 1
+          `,
+            [s.booking_id, room.id, s.check_in, s.check_out],
+          );
+
+          // =====================================================
+          // UPDATE
+          // =====================================================
+
+          if (existsRows.length > 0) {
+            await conn.query(
+              `
+              UPDATE room_booking_history
+              SET
+                payload = ?,
+                room_group_id = ?,
+                source = ?,
+                guest_name = ?,
+                guest_phone = ?,
+                qty = ?,
+                price = ?,
+                product_name = ?,
+                canceled = 0
+              WHERE id = ?
+            `,
+              [
+                JSON.stringify(payload),
+
+                Number(groupId),
+
+                s.source || "naver",
+
+                s.name || null,
+                s.phone || null,
+
+                s.qty || null,
+                s.price || null,
+
+                s.product_name || null,
+
+                existsRows[0].id,
+              ],
+            );
+          } else {
+            // =====================================================
+            // INSERT
+            // =====================================================
+
+            await conn.query(
+              `
+              INSERT INTO room_booking_history (
+                payload,
+                booking_id,
+
+                check_in,
+                check_out,
+
+                room_id,
+                room_group_id,
+
+                source,
+
+                guest_name,
+                guest_phone,
+
+                qty,
+                price,
+
+                product_name,
+
+                canceled
+              )
+              VALUES (
+                ?, ?,
+                ?, ?,
+                ?, ?,
+                ?,
+                ?, ?,
+                ?, ?,
+                ?,
+                0
+              )
+            `,
+              [
+                JSON.stringify(payload),
+
+                s.booking_id || null,
+
+                s.check_in,
+                s.check_out,
+
+                room.id,
+                Number(groupId),
+
+                s.source || "naver",
+
+                s.name || null,
+                s.phone || null,
+
+                s.qty || null,
+                s.price || null,
+
+                s.product_name || null,
+              ],
+            );
+          }
+        }
+
+        // =====================================================
+        // room 상태 저장
+        // =====================================================
+
+        await conn.query(
+          `
           UPDATE room
           SET
             is_active = 0,
@@ -3787,41 +3825,74 @@ export const syncNaverBookingsToRooms = async () => {
             naver_crawling_info = ?,
             is_ota = 1
           WHERE id = ?
-        `, [
-          first.check_in,
-          first.check_out,
-          first.check_in,
-          first.check_out,
-          JSON.stringify(
-            schedule.map((s) => ({
-              check_in: s.check_in,
-              check_out: s.check_out,
-              source: s.source
-            }))
-          ),
-          JSON.stringify(
-            schedule.map((s) => ({
-              booking_id: s.booking_id,
-              name: s.name,
-              phone: s.phone,
-              product_name: s.product_name,
-              qty: s.qty,
-              price: s.price,
-              check_in: s.check_in,
-              check_out: s.check_out
-            }))
-          ),
-          room.id
-        ]);
+        `,
+          [
+            first.check_in,
+            first.check_out,
+
+            first.check_in,
+            first.check_out,
+
+            JSON.stringify(
+              schedule.map((s) => ({
+                check_in: s.check_in,
+                check_out: s.check_out,
+                source: s.source,
+              })),
+            ),
+
+            JSON.stringify(
+              schedule.map((s) => ({
+                booking_id: s.booking_id,
+                name: s.name,
+                phone: s.phone,
+                product_name: s.product_name,
+                qty: s.qty,
+                price: s.price,
+                check_in: s.check_in,
+                check_out: s.check_out,
+              })),
+            ),
+
+            room.id,
+          ],
+        );
+      }
+    }
+
+    // =====================================================
+    // 취소 예약 감지
+    // =====================================================
+
+    const [historyRows] = await conn.query(`
+      SELECT id, booking_id
+      FROM room_booking_history
+      WHERE
+        source = 'naver'
+        AND canceled = 0
+    `);
+
+    for (const row of historyRows) {
+      if (row.booking_id && !aliveBookingIds.has(String(row.booking_id))) {
+        await conn.query(
+          `
+          UPDATE room_booking_history
+          SET canceled = 1
+          WHERE id = ?
+        `,
+          [row.id],
+        );
+
+        console.log(`[예약취소감지] booking_id=${row.booking_id}`);
       }
     }
 
     await conn.commit();
 
     console.log("🟢 [SYNC 완료]");
-
   } catch (err) {
     await conn.rollback();
+
     console.error("🔴 [SYNC ERROR]", err);
   } finally {
     conn.release();
@@ -3831,20 +3902,22 @@ export const syncNaverBookingsToRooms = async () => {
 // 10분 주기 실행
 let isSyncing = false;
 
-setInterval(async () => {
-  if (isSyncing) return;
-  isSyncing = true;
+setInterval(
+  async () => {
+    if (isSyncing) return;
+    isSyncing = true;
 
-  try {
-    await syncNaverBookingsToRooms();
-  } finally {
-    isSyncing = false;
-  }
-}, 1000 * 60 * 10);
+    try {
+      await syncNaverBookingsToRooms();
+    } finally {
+      isSyncing = false;
+    }
+  },
+  1000 * 60 * 10,
+);
 
 // 초기 1회 실행
 syncNaverBookingsToRooms();
-
 
 export const expirePendingReservations = async (conn) => {
   await conn.query(`
@@ -3855,8 +3928,6 @@ export const expirePendingReservations = async (conn) => {
       AND created_at < NOW() - INTERVAL 30 MINUTE
   `);
 };
-
-
 
 // 10분 주기 실행
 let isSyncing2 = false;
@@ -3883,11 +3954,14 @@ runExpireJob();
 // 10분 주기
 setInterval(runExpireJob, 1000 * 60 * 10);
 
-
 app.get("/api/for_debuging", async (req, res) => {
   try {
-    const [rows] = await pool.query(`SELECT * FROM naver_bookings ORDER BY id ASC`);
-    const [rows2] = await pool.query(`SELECT * FROM room_group ORDER BY id ASC`);
+    const [rows] = await pool.query(
+      `SELECT * FROM naver_bookings ORDER BY id ASC`,
+    );
+    const [rows2] = await pool.query(
+      `SELECT * FROM room_group ORDER BY id ASC`,
+    );
     const [rows3] = await pool.query(`SELECT * FROM room ORDER BY id ASC`);
     return res.json({
       ok: true,
