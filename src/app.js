@@ -2348,7 +2348,7 @@ app.post("/api/payment/return", async (req, res) => {
       // });
       return res.redirect(
         "https://dreamping.co.kr/shopinfo/payment-cancel.html",
-    );
+      );
     }
 
     // =========================
@@ -2383,7 +2383,7 @@ app.post("/api/payment/return", async (req, res) => {
     // =========================
     // 8. 예약 확정
     // =========================
-    console.log("this:",data)
+    console.log("this:", data);
     await conn.query(
       `
       UPDATE reservations_info
@@ -2405,7 +2405,7 @@ app.post("/api/payment/return", async (req, res) => {
     // });
 
     return res.redirect(
-        "https://dreamping.co.kr/shopinfo/payment-success.html",
+      "https://dreamping.co.kr/shopinfo/payment-success.html",
     );
   } catch (error) {
     await conn.rollback();
@@ -2416,9 +2416,7 @@ app.post("/api/payment/return", async (req, res) => {
     //   ok: false,
     //   message: error.message || "서버 오류",
     // });
-    return res.redirect(
-        "https://dreamping.co.kr/shopinfo/payment-cancel.html",
-    );
+    return res.redirect("https://dreamping.co.kr/shopinfo/payment-cancel.html");
   } finally {
     conn.release();
   }
@@ -2631,7 +2629,7 @@ document.mobileweb.submit();
 // ======================================================
 
 app.post("/api/payment/mobile/return", async (req, res) => {
-  console.log("return run")
+  console.log("return run");
   const conn = await pool.getConnection();
 
   const getAllSchedules = (room) => {
@@ -2696,7 +2694,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
 
     if (!P_TID || !P_AMT || !P_NOTI || !P_REQ_URL) {
       await conn.rollback();
-       console.log("auth_fail2");
+      console.log("auth_fail2");
       return res.redirect(
         "https://dreamping.co.kr/shopinfo/payment-cancel.html",
       );
@@ -2754,7 +2752,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
       },
       timeout: 10000,
     });
-   
+
     // =========================
     // 5. 응답 파싱
     // =========================
@@ -2838,11 +2836,10 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     const IS_MOBILE_TEST = true;
     if (IS_MOBILE_TEST) {
       if (Number(result.P_AMT) !== 1000) {
-        console.log(1000_01)
+        console.log(1000_01);
         return res.redirect(
           "https://dreamping.co.kr/shopinfo/payment-cancel.html",
         );
-        
       }
     } else {
       if (Number(reservation.total_amount) !== Number(result.P_AMT)) {
@@ -2858,11 +2855,10 @@ app.post("/api/payment/mobile/return", async (req, res) => {
         );
 
         await conn.commit();
-        console.log(1000_02)
+        console.log(1000_02);
         return res.redirect(
           "https://dreamping.co.kr/shopinfo/payment-cancel.html",
         );
-        
       }
     }
 
