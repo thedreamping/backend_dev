@@ -2991,6 +2991,60 @@ app.post("/api/payment/mobile/return", async (req, res) => {
   }
 });
 
+app.get("/api/reservation_info/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        id,
+        room_id,
+        room_group_id,
+        check_in,
+        check_out,
+        nights,
+        total_amount,
+        status,
+        order_id,
+        buyer_name,
+        buyer_tel,
+        buyer_email,
+        created_at,
+        updated_at,
+        memo,
+        options,
+        tid
+      FROM reservations_info
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [id],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "예약 정보를 찾을 수 없습니다.",
+      });
+    }
+
+    const reservation = rows[0];
+
+    return res.json({
+      ok: true,
+      data: reservation,
+    });
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "서버 오류",
+    });
+  }
+});
+
 app.post("/api/dk_schedule", verifyToken, async (req, res) => {
   try {
     const { days, schedule_name, schedule_contents, color } = req.body;
