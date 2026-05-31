@@ -2472,8 +2472,8 @@ app.get("/api/payment/mobile/start/:reservationId", async (req, res) => {
 
     const signKey = process.env.INICIS_SIGN_KEY;
 
-    const price = String(Number(reservation.total_amount));
-
+    //const price = String(Number(reservation.total_amount));
+    const price = "1000";
     const timestamp = Date.now();
 
     // =========================
@@ -2822,21 +2822,33 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     // =========================
     // 9. 금액 검증
     // =========================
-    if (Number(reservation.total_amount) !== Number(result.P_AMT)) {
-      await conn.query(
-        `
-          UPDATE reservations_info
-          SET
-            status='CANCELLED',
-            updated_at=NOW()
-          WHERE id=?
-          `,
-        [reservation.id],
-      );
 
-      await conn.commit();
+    const IS_MOBILE_TEST = true;
+    if (IS_MOBILE_TEST) {
+      if (Number(result.P_AMT) !== 1000) {
+        return res.redirect(
+          "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+        );
+      }
+    } else {
+      if (Number(reservation.total_amount) !== Number(result.P_AMT)) {
+        await conn.query(
+          `
+            UPDATE reservations_info
+            SET
+              status='CANCELLED',
+              updated_at=NOW()
+            WHERE id=?
+            `,
+          [reservation.id],
+        );
 
-      return res.send("금액 불일치");
+        await conn.commit();
+
+        return res.redirect(
+          "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+        );
+      }
     }
 
     // =========================
