@@ -3004,6 +3004,13 @@ function getTimestamp() {
     pad(d.getSeconds())
   );
 }
+function pad(number, length) {
+  var str = "" + number;
+  while (str.length < length) {
+    str = "0" + str;
+  }
+  return str;
+}
 Date.prototype.YYYYMMDDHHMMSS = function () {
   var yyyy = this.getFullYear().toString();
   var MM = pad(this.getMonth() + 1, 2);
