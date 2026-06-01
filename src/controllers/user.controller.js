@@ -180,7 +180,7 @@ export const sendOtpSmsNaver = async (phone, otp) => {
       contentType: "COMM",
       countryCode: "82", // 한국: 82
       from: sender,
-      content: `[서비스명] 인증번호 ${otp}
+      content: `[더드림핑 번호인증] 인증번호 ${otp}
 본인 확인용이며 3분간 유효합니다.`,
       messages: [{ to: phone }],
     };

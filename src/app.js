@@ -2990,6 +2990,129 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     conn.release();
   }
 });
+function getTimestamp() {
+  const d = new Date();
+
+  const pad = (n) => String(n).padStart(2, "0");
+
+  return (
+    d.getFullYear() +
+    pad(d.getMonth() + 1) +
+    pad(d.getDate()) +
+    pad(d.getHours()) +
+    pad(d.getMinutes()) +
+    pad(d.getSeconds())
+  );
+}
+
+app.post("/api/reservation/refund", async (req, res) => {
+  const conn = await pool.getConnection();
+
+  try {
+    const { reservationId } = req.body;
+
+    const [rows] = await conn.query(
+      `
+      SELECT *
+      FROM reservations_info
+      WHERE id = ?
+      `,
+      [reservationId],
+    );
+
+    if (!rows.length) {
+      return res.json({
+        ok: false,
+        message: "예약 없음",
+      });
+    }
+
+    const reservation = rows[0];
+
+    if (reservation.status === "CANCEL") {
+      return res.json({
+        ok: false,
+        message: "이미 환불된 예약",
+      });
+    }
+
+    if (!reservation.tid) {
+      return res.json({
+        ok: false,
+        message: "TID 없음",
+      });
+    }
+
+    const nowDate = new Date();
+
+    const key = process.env.INICIS_API_KEY;
+    const mid = process.env.INICIS_MID;
+
+    const type = "refund";
+
+    const timestamp = nowDate.YYYYMMDDHHMMSS();
+
+    const data = {
+      tid: reservation.tid,
+      msg: "고객 환불",
+    };
+
+    let plainTxt = key + mid + type + timestamp + JSON.stringify(data);
+
+    plainTxt = plainTxt.replace(/\\/g, "");
+
+    const hashData = crypto.createHash("sha512").update(plainTxt).digest("hex");
+
+    const result = await fetch("https://iniapi.inicis.com/v2/pg/refund", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mid: mid,
+        type: type,
+        timestamp: timestamp,
+        clientIp: req.ip,
+        data: data,
+        hashData: hashData,
+      }),
+    });
+
+    const refundResult = await result.json();
+
+    console.log(refundResult);
+
+    if (refundResult.resultCode !== "00") {
+      return res.json({
+        ok: false,
+        message: refundResult.resultMsg,
+      });
+    }
+
+    await conn.query(
+      `
+      UPDATE reservations_info
+      SET
+        status = 'CANCEL',
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [reservation.id],
+    );
+
+    return res.json({
+      ok: true,
+    });
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      ok: false,
+    });
+  } finally {
+    conn.release();
+  }
+});
 
 app.get("/api/reservation_info/:id", async (req, res) => {
   try {
