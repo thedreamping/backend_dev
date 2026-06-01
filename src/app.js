@@ -3022,6 +3022,7 @@ Date.prototype.YYYYMMDDHHMMSS = function () {
 
   return yyyy + MM + dd + hh + mm + ss;
 };
+
 app.post("/api/reservation/refund", async (req, res) => {
   const conn = await pool.getConnection();
 
@@ -3060,19 +3061,82 @@ app.post("/api/reservation/refund", async (req, res) => {
       });
     }
 
-    const nowDate = new Date();
+    // -------------------
+    // 환불 비율 계산
+    // -------------------
+
+    const [refundRows] = await conn.query(
+      `
+      SELECT *
+      FROM refund_info
+      ORDER BY day_before DESC
+      `,
+    );
+
+    const today = new Date();
+    const checkIn = new Date(reservation.check_in);
+
+    today.setHours(0, 0, 0, 0);
+    checkIn.setHours(0, 0, 0, 0);
+
+    const dayBefore = Math.floor((checkIn - today) / (1000 * 60 * 60 * 24));
+
+    let refundPercent = 0;
+
+    for (const row of refundRows) {
+      if (dayBefore >= row.day_before) {
+        refundPercent = row.per;
+        break;
+      }
+    }
+
+    const totalAmount = Number(reservation.total_amount);
+
+    const refundAmount = Math.floor((totalAmount * refundPercent) / 100);
+
+    const confirmPrice = totalAmount - refundAmount;
+
+    console.log({
+      dayBefore,
+      refundPercent,
+      refundAmount,
+      confirmPrice,
+    });
 
     const key = process.env.INICIS_API_KEY;
     const mid = process.env.INICIS_MID;
 
-    const type = "refund";
+    const timestamp = new Date().YYYYMMDDHHMMSS();
 
-    const timestamp = nowDate.YYYYMMDDHHMMSS();
+    let type;
+    let data;
 
-    const data = {
-      tid: reservation.tid,
-      msg: "고객 환불",
-    };
+    // -------------------
+    // 100% 환불
+    // -------------------
+
+    if (refundPercent === 100) {
+      type = "refund";
+
+      data = {
+        tid: reservation.tid,
+        msg: "고객 환불",
+      };
+    }
+
+    // -------------------
+    // 부분 환불
+    // -------------------
+    else {
+      type = "partialRefund";
+
+      data = {
+        tid: reservation.tid,
+        msg: "고객 부분환불",
+        price: String(refundAmount),
+        confirmPrice: String(confirmPrice),
+      };
+    }
 
     let plainTxt = key + mid + type + timestamp + JSON.stringify(data);
 
@@ -3080,29 +3144,37 @@ app.post("/api/reservation/refund", async (req, res) => {
 
     const hashData = crypto.createHash("sha512").update(plainTxt).digest("hex");
 
-    const result = await fetch("https://iniapi.inicis.com/v2/pg/refund", {
+    const apiUrl =
+      type === "refund"
+        ? "https://iniapi.inicis.com/v2/pg/refund"
+        : "https://iniapi.inicis.com/v2/pg/partialRefund";
+
+    const result = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        mid: mid,
-        type: type,
-        timestamp: timestamp,
+        mid,
+        type,
+        timestamp,
         clientIp: req.ip,
-        data: data,
-        hashData: hashData,
+        data,
+        hashData,
       }),
     });
 
     const refundResult = await result.json();
 
-    console.log(refundResult);
+    console.log("refundResult", refundResult);
 
-    if (refundResult.resultCode !== "00") {
+    if (
+      refundResult.resultCode !== "00" &&
+      refundResult.resultCode !== "0000"
+    ) {
       return res.json({
         ok: false,
-        message: refundResult.resultMsg,
+        message: refundResult.resultMsg || "환불 실패",
       });
     }
 
@@ -3111,20 +3183,25 @@ app.post("/api/reservation/refund", async (req, res) => {
       UPDATE reservations_info
       SET
         status = 'CANCELLED',
+        refund_percent = ?,
+        refund_amount = ?,
         updated_at = NOW()
       WHERE id = ?
       `,
-      [reservation.id],
+      [refundPercent, refundAmount, reservation.id],
     );
 
     return res.json({
       ok: true,
+      refundPercent,
+      refundAmount,
     });
   } catch (err) {
     console.error(err);
 
     return res.status(500).json({
       ok: false,
+      message: "서버 오류",
     });
   } finally {
     conn.release();
