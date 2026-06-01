@@ -2405,7 +2405,7 @@ app.post("/api/payment/return", async (req, res) => {
     // });
 
     return res.redirect(
-      "https://dreamping.co.kr/shopinfo/payment-success.html",
+      `https://dreamping.co.kr/shopinfo/payment-success.html?reservationId=${reservation.id}`,
     );
   } catch (error) {
     await conn.rollback();
