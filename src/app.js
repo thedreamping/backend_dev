@@ -3011,6 +3011,7 @@ function pad(number, length) {
   }
   return str;
 }
+
 Date.prototype.YYYYMMDDHHMMSS = function () {
   var yyyy = this.getFullYear().toString();
   var MM = pad(this.getMonth() + 1, 2);
@@ -4328,5 +4329,5 @@ app.use((req, res, next) => {
 
 // 에러 핸들러
 app.use(errorMiddleware);
-
+//a
 export default app;
