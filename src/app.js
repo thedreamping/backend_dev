@@ -3090,7 +3090,10 @@ app.post("/api/reservation/refund", async (req, res) => {
       }
     }
 
-    const totalAmount = Number(reservation.total_amount);
+    // const totalAmount = Number(reservation.total_amount);
+
+    // const refundAmount = Math.floor((totalAmount * refundPercent) / 100);
+    const totalAmount = 1000;
 
     const refundAmount = Math.floor((totalAmount * refundPercent) / 100);
 
