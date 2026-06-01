@@ -3046,7 +3046,7 @@ app.post("/api/reservation/refund", async (req, res) => {
 
     const reservation = rows[0];
 
-    if (reservation.status === "CANCEL") {
+    if (reservation.status === "CANCELLED") {
       return res.json({
         ok: false,
         message: "이미 환불된 예약",
@@ -3110,7 +3110,7 @@ app.post("/api/reservation/refund", async (req, res) => {
       `
       UPDATE reservations_info
       SET
-        status = 'CANCEL',
+        status = 'CANCELLED',
         updated_at = NOW()
       WHERE id = ?
       `,
