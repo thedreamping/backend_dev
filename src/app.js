@@ -2500,7 +2500,9 @@ app.get("/api/payment/mobile/start/:reservationId", async (req, res) => {
     // =========================
     const nextUrl =
       "https://dreampingback.duckdns.org:4000/api/payment/mobile/return";
-
+    const buyerName = reservation.buyer_name;
+    const buyerTel = reservation.buyer_tel;
+    const buyerEmail = reservation.buyer_email;
     // =========================
     // 모바일 자동 submit 페이지
     // =========================
@@ -2558,19 +2560,19 @@ value="더드림핑 예약"
 <input
 type="hidden"
 name="P_UMANE"
-value="${reservation.buyer_name || ""}"
+value="${buyerName}"
 />
 
 <input
 type="hidden"
 name="P_MOBILE"
-value="${reservation.buyer_tel || ""}"
+value="${buyerTel}"
 />
 
 <input
 type="hidden"
 name="P_EMAIL"
-value="${reservation.buyer_email || ""}"
+value="${buyerEmail}"
 />
 
 <input
