@@ -2503,6 +2503,7 @@ app.get("/api/payment/mobile/start/:reservationId", async (req, res) => {
     const buyerName = reservation.buyer_name;
     const buyerTel = reservation.buyer_tel;
     const buyerEmail = reservation.buyer_email;
+    console.log("name:",buyerName);
     // =========================
     // 모바일 자동 submit 페이지
     // =========================
