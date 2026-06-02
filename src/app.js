@@ -2503,6 +2503,7 @@ app.get("/api/payment/mobile/start/:reservationId", async (req, res) => {
     const buyerName = reservation.buyer_name;
     const buyerTel = reservation.buyer_tel;
     const buyerEmail = reservation.buyer_email;
+    const product = reservation.product_name;
     console.log("name:", buyerName);
     // =========================
     // 모바일 자동 submit 페이지
@@ -2555,12 +2556,12 @@ value="${price}"
 <input
 type="hidden"
 name="P_GOODS"
-value="더드림핑 예약"
+value="${product}"
 />
 
 <input
 type="hidden"
-name="P_UMANE"
+name="P_UNAME"
 value="${buyerName}"
 />
 
@@ -2690,7 +2691,8 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     const P_AMT = req.body.P_AMT;
 
     const P_NOTI = req.body.P_NOTI;
-    const P_UMANE = req.body.P_UMANE;
+    const P_UNAME = req.body.P_UNAME;
+    console.log("uname:",P_UNAME)
 
     const idc_name = "ks";
 
@@ -2749,7 +2751,6 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     params.append("P_MID", process.env.INICIS_MID);
 
     params.append("P_TID", P_TID);
-    params.append("P_UMANE", P_UMANE);
     console.log("before_auto");
     const authResponse = await axios.post(authUrl, params.toString(), {
       headers: {
