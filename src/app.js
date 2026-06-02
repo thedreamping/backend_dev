@@ -2449,6 +2449,17 @@ app.get("/api/payment/mobile/start/:reservationId", async (req, res) => {
       return res.status(404).send("예약 없음");
     }
 
+    const [room_group] = await pool.query(
+      `
+        SELECT *
+        FROM room_group
+        WHERE id = ?
+        `,
+      [rows[0].room_group_id],
+    );
+
+    const room_group_name = room_group[0].name;
+
     const reservation = rows[0];
 
     if (reservation.status !== "PENDING") {
@@ -2503,8 +2514,7 @@ app.get("/api/payment/mobile/start/:reservationId", async (req, res) => {
     const buyerName = reservation.buyer_name;
     const buyerTel = reservation.buyer_tel;
     const buyerEmail = reservation.buyer_email;
-    const product = reservation.product_name;
-    console.log("name:", buyerName);
+
     // =========================
     // 모바일 자동 submit 페이지
     // =========================
@@ -2556,7 +2566,7 @@ value="${price}"
 <input
 type="hidden"
 name="P_GOODS"
-value="${product}"
+value="${room_group_name}"
 />
 
 <input
@@ -2692,7 +2702,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
 
     const P_NOTI = req.body.P_NOTI;
     const P_UNAME = req.body.P_UNAME;
-    console.log("uname:",P_UNAME)
+    console.log("uname:", P_UNAME);
 
     const idc_name = "ks";
 
