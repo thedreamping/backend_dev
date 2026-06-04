@@ -3700,7 +3700,7 @@ app.get("/api/reservation_history", async (req, res) => {
   }
 });
 // GET /api/reservation_info
-app.get("/api/reservation_info", async (req, res) => {
+app.get("/api/reservation_infos", async (req, res) => {
   let conn;
 
   try {
