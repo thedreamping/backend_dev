@@ -3549,6 +3549,12 @@ app.get("/api/reservation_history", async (req, res) => {
       guest_name = "",
       guest_phone = "",
       memo = "",
+
+      check_in_from = "",
+      check_in_to = "",
+
+      check_out_from = "",
+      check_out_to = "",
     } = req.query;
 
     page = Number(page) || 1;
@@ -3569,20 +3575,45 @@ app.get("/api/reservation_history", async (req, res) => {
 
     if (guest_name) {
       where.push(`guest_name LIKE ?`);
-
       params.push(`%${guest_name}%`);
     }
 
     if (guest_phone) {
       where.push(`guest_phone LIKE ?`);
-
       params.push(`%${guest_phone}%`);
     }
 
     if (memo) {
       where.push(`memo LIKE ?`);
-
       params.push(`%${memo}%`);
+    }
+
+    // =====================================================
+    // 체크인 기간 검색 (KST 기준)
+    // =====================================================
+
+    if (check_in_from) {
+      where.push(`DATE(CONVERT_TZ(check_in,'+00:00','+09:00')) >= ?`);
+      params.push(check_in_from);
+    }
+
+    if (check_in_to) {
+      where.push(`DATE(CONVERT_TZ(check_in,'+00:00','+09:00')) <= ?`);
+      params.push(check_in_to);
+    }
+
+    // =====================================================
+    // 체크아웃 기간 검색 (KST 기준)
+    // =====================================================
+
+    if (check_out_from) {
+      where.push(`DATE(CONVERT_TZ(check_out,'+00:00','+09:00')) >= ?`);
+      params.push(check_out_from);
+    }
+
+    if (check_out_to) {
+      where.push(`DATE(CONVERT_TZ(check_out,'+00:00','+09:00')) <= ?`);
+      params.push(check_out_to);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -3596,7 +3627,7 @@ app.get("/api/reservation_history", async (req, res) => {
       SELECT COUNT(*) AS total
       FROM room_booking_history
       ${whereSql}
-    `,
+      `,
       params,
     );
 
@@ -3610,7 +3641,6 @@ app.get("/api/reservation_history", async (req, res) => {
       `
       SELECT
         id,
-
         booking_id,
 
         check_in,
@@ -3641,7 +3671,7 @@ app.get("/api/reservation_history", async (req, res) => {
       ORDER BY id DESC
       LIMIT ?
       OFFSET ?
-    `,
+      `,
       [...params, limit, offset],
     );
 
@@ -3667,6 +3697,106 @@ app.get("/api/reservation_history", async (req, res) => {
       ok: false,
       message: "reservation_history 조회 실패",
     });
+  }
+});
+// GET /api/reservation_info
+app.get("/api/reservation_info", async (req, res) => {
+  let conn;
+
+  try {
+    conn = await pool.getConnection();
+
+    const {
+      buyer_name,
+      check_in_from,
+      check_in_to,
+      check_out_from,
+      check_out_to,
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const pageNum = Math.max(Number(page), 1);
+    const limitNum = Math.max(Number(limit), 1);
+    const offset = (pageNum - 1) * limitNum;
+
+    let where = [];
+    let params = [];
+
+    // 이름 검색
+    if (buyer_name) {
+      where.push(`buyer_name LIKE ?`);
+      params.push(`%${buyer_name}%`);
+    }
+
+    // 체크인 기간
+    if (check_in_from) {
+      where.push(`check_in >= ?`);
+      params.push(check_in_from);
+    }
+
+    if (check_in_to) {
+      where.push(`check_in <= ?`);
+      params.push(check_in_to);
+    }
+
+    // 체크아웃 기간
+    if (check_out_from) {
+      where.push(`check_out >= ?`);
+      params.push(check_out_from);
+    }
+
+    if (check_out_to) {
+      where.push(`check_out <= ?`);
+      params.push(check_out_to);
+    }
+
+    const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+
+    // 전체 개수
+    const [countRows] = await conn.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM reservations_info
+      ${whereSql}
+      `,
+      params,
+    );
+
+    const total = countRows[0].total;
+
+    // 목록 조회
+    const [rows] = await conn.query(
+      `
+      SELECT *
+      FROM reservations_info
+      ${whereSql}
+      ORDER BY id DESC
+      LIMIT ?
+      OFFSET ?
+      `,
+      [...params, limitNum, offset],
+    );
+
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  } finally {
+    if (conn) conn.release();
   }
 });
 
@@ -4334,6 +4464,7 @@ export const syncNaverBookingsToRooms = async () => {
     conn.release();
   }
 };
+
 syncNaverBookingsToRooms();
 // 10분 주기 실행
 let isSyncing = false;
