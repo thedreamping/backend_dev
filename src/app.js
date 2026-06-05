@@ -3032,11 +3032,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     const productName = groupRows?.[0]?.name || "객실";
     const buyerName = reservation.buyer_name || "고객";
 
-    const text = `[드림핑]\n
-    ${buyerName}님 예약완료\n
-    ${productName}\n
-    예약번호:${reservation.id}\n
-    ${formatDateForSms(reservation.check_in)} ~ ${formatDateForSms(reservation.check_out)}`;
+    const text = `[드림핑] 예약 완료\n${buyerName} 님 예약이 완료되었습니다.\n예약번호: ${reservation.id}\n상품: ${productName}\n체크인:${formatDateForSms(reservation.check_in)}\n체크아웃:${formatDateForSms(reservation.check_out)}\n\n감사합니다.`;
 
     try {
       if (reservation.buyer_tel) {
