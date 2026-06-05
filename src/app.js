@@ -2422,7 +2422,7 @@ app.post("/api/payment/return", async (req, res) => {
     );
 
     const productName = groupRows.length > 0 ? groupRows[0].name : "객실";
-
+    console.log(formatDateForSms(reservation.check_in));
     try {
       await messageService.send({
         to: reservation.buyer_tel,
