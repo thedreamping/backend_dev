@@ -4052,10 +4052,11 @@ export const syncNaverBookingsToRooms = async () => {
                 name: period.name,
                 phone: period.phone,
                 price: period.price,
+                qty: period.qty,
                 qty_index: q + 1,
                 qty_total: qty,
-                booking_option: period.booking_option, // ✔ 추가
-                request_memo: period.request_memo, // ✔ 추가
+                booking_option: period.booking_option,
+                request_memo: period.request_memo,
               });
               assigned = true;
               break;
@@ -4082,6 +4083,7 @@ export const syncNaverBookingsToRooms = async () => {
                   price: period.price,
                   qty_index: q + 1,
                   qty_total: qty,
+                  qty: period.qty,
                   booking_option: period.booking_option, // ✔ 추가
                   request_memo: period.request_memo, // ✔ 추가
                 });
@@ -4118,29 +4120,56 @@ export const syncNaverBookingsToRooms = async () => {
 
         await conn.query(
           `
-          UPDATE room
-          SET
-            is_active = 0,
-            available = 0,
-            disable_start = ?,
-            disable_end = ?,
-            check_in = ?,
-            check_out = ?,
-            check_in_and_out = ?
-          WHERE id = ?
+           UPDATE room
+            SET
+              is_active = 0,
+              available = 0,
+              disable_start = ?,
+              disable_end = ?,
+              check_in = ?,
+              check_out = ?,
+              check_in_and_out = ?,
+              naver_crawling_info = ?,
+              is_ota = 1
+            WHERE id = ?
         `,
           [
             first.check_in,
             first.check_out,
             first.check_in,
             first.check_out,
+
             JSON.stringify(
               schedule.map((s) => ({
                 check_in: s.check_in,
                 check_out: s.check_out,
                 source: s.source,
+                booking_option: s.booking_option,
+                request_memo: s.request_memo,
               })),
             ),
+
+            JSON.stringify(
+              schedule.map((s) => ({
+                booking_id: s.booking_id,
+                reservation_id: s.reservation_id,
+
+                name: s.name,
+                phone: s.phone,
+
+                product_name: group.name,
+
+                qty: s.qty,
+                price: s.price,
+
+                booking_option: s.booking_option,
+                request_memo: s.request_memo,
+
+                check_in: s.check_in,
+                check_out: s.check_out,
+              })),
+            ),
+
             room.id,
           ],
         );
