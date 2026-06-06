@@ -1980,6 +1980,7 @@ app.post("/api/reservation", async (req, res) => {
       roomInfo,
       options,
       price,
+      qty,
     } = req.body;
 
     if (!name || !phone || !startDate || !endDate || !roomInfo) {
@@ -2022,10 +2023,11 @@ app.post("/api/reservation", async (req, res) => {
         buyer_email,
         memo,
         options,
+        qty,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, NOW(), NOW())
+      VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?,?, NOW(), NOW())
       `,
       [
         roomInfo.room_group_id,
@@ -2038,6 +2040,7 @@ app.post("/api/reservation", async (req, res) => {
         phone.trim(),
         email ? email.trim() : null,
         memo ? memo.trim() : null,
+        qty,
         options ? JSON.stringify(options) : null,
       ],
     );
@@ -3928,8 +3931,10 @@ export const syncNaverBookingsToRooms = async () => {
         total_amount,
         check_in,
         check_out,
+        product_name,
         options,
-        memo
+        memo,
+        qty
       FROM reservations_info
       WHERE status = 'PAID'
         AND check_out >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
@@ -4013,7 +4018,7 @@ export const syncNaverBookingsToRooms = async () => {
           name: r.buyer_name,
           phone: r.buyer_tel,
           price: r.total_amount,
-          qty: 1,
+          qty: r.qty,
           booking_option: safeParse(r.options),
           request_memo: r.memo,
         });
@@ -4026,46 +4031,74 @@ export const syncNaverBookingsToRooms = async () => {
         const start = period.check_in;
         const end = period.check_out;
 
-        let assigned = false;
+        const qty = Number(period.qty) || 1;
 
-        for (const room of rooms) {
-          const schedule = roomSchedules.get(room.id);
+        for (let q = 0; q < qty; q++) {
+          let assigned = false;
 
-          const strictOverlap = schedule.some(
-            (s) => start <= s.check_out && s.check_in <= end,
-          );
-
-          if (!strictOverlap) {
-            schedule.push(period);
-            assigned = true;
-            break;
-          }
-        }
-
-        // ==============================
-        // 🔥 바톤터치 허용
-        // ==============================
-        if (!assigned) {
           for (const room of rooms) {
             const schedule = roomSchedules.get(room.id);
 
-            const relaxedOverlap = schedule.some(
-              (s) => start < s.check_out && s.check_in < end,
+            const strictOverlap = schedule.some(
+              (s) => start <= s.check_out && s.check_in <= end,
             );
 
-            if (!relaxedOverlap) {
-              schedule.push(period);
-              console.log(
-                `[바톤터치] ${period.booking_id || period.reservation_id}`,
-              );
+            if (!strictOverlap) {
+              schedule.push({
+                source: period.source,
+                booking_id: period.booking_id,
+                reservation_id: period.reservation_id,
+                check_in: period.check_in,
+                check_out: period.check_out,
+                name: period.name,
+                phone: period.phone,
+                price: period.price,
+                qty_index: q + 1,
+                qty_total: qty,
+              });
               assigned = true;
               break;
             }
           }
-        }
 
-        if (!assigned) {
-          console.warn("[FAIL]", period.booking_id || period.reservation_id);
+          if (!assigned) {
+            for (const room of rooms) {
+              const schedule = roomSchedules.get(room.id);
+
+              const relaxedOverlap = schedule.some(
+                (s) => start < s.check_out && s.check_in < end,
+              );
+
+              if (!relaxedOverlap) {
+                schedule.push({
+                  source: period.source,
+                  booking_id: period.booking_id,
+                  reservation_id: period.reservation_id,
+                  check_in: period.check_in,
+                  check_out: period.check_out,
+                  name: period.name,
+                  phone: period.phone,
+                  price: period.price,
+                  qty_index: q + 1,
+                  qty_total: qty,
+                });
+
+                console.log(
+                  `[바톤터치] ${period.booking_id || period.reservation_id}`,
+                );
+                assigned = true;
+                break;
+              }
+            }
+          }
+
+          if (!assigned) {
+            console.warn(
+              "[FAIL]",
+              period.booking_id || period.reservation_id,
+              q,
+            );
+          }
         }
       }
 
@@ -4115,18 +4148,18 @@ export const syncNaverBookingsToRooms = async () => {
         for (const s of schedule) {
           const bookingId =
             s.source === "website"
-              ? `SITE_${s.reservation_id}`
-              : String(s.booking_id);
+              ? `SITE_${s.reservation_id}_${s.qty_index}`
+              : `${s.booking_id}_${s.qty_index}`;
 
           const payload = {
             booking_id: bookingId,
             reservation_id: s.reservation_id || null,
+            qty_index: s.qty_index,
+            qty_total: s.qty_total,
             name: s.name,
             phone: s.phone,
             price: s.price,
-            qty: s.qty,
-            booking_option: s.booking_option,
-            request_memo: s.request_memo,
+            original_qty: s.qty,
             check_in: s.check_in,
             check_out: s.check_out,
           };
@@ -4167,7 +4200,6 @@ export const syncNaverBookingsToRooms = async () => {
                 guest_phone,
                 qty,
                 price,
-                product_name,
                 canceled
               )
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
@@ -4184,7 +4216,6 @@ export const syncNaverBookingsToRooms = async () => {
                 s.phone,
                 s.qty,
                 s.price,
-                s.product_name || null,
               ],
             );
           }
