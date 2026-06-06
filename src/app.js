@@ -4051,21 +4051,27 @@ export const syncNaverBookingsToRooms = async () => {
               break;
             }
           }
-
+          const isDayUse = start === end;
           // 2차 바톤터치
           if (!assigned) {
             for (const room of rooms) {
               const schedule = roomSchedules.get(room.id);
 
-              const relaxedOverlap = schedule.some(
-                (s) => start < s.check_out && s.check_in < end,
-              );
+              const relaxedOverlap = schedule.some((s) => {
+                // 데이유즈끼리는 같은 날짜 중복 금지
+                if (
+                  isDayUse &&
+                  s.check_in === s.check_out &&
+                  s.check_in === start
+                ) {
+                  return true;
+                }
+
+                return start < s.check_out && s.check_in < end;
+              });
 
               if (!relaxedOverlap) {
                 schedule.push(period);
-                console.log(
-                  `[바톤터치] ${period.booking_id || period.reservation_id}`,
-                );
                 assigned = true;
                 break;
               }
