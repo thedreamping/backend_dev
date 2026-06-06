@@ -4099,7 +4099,9 @@ export const syncNaverBookingsToRooms = async () => {
         check_in,
         check_out,
         status,
-        created_at
+        created_at,
+        options,
+        memo
       FROM reservations_info
       WHERE
         status = 'PAID'
@@ -4209,7 +4211,16 @@ export const syncNaverBookingsToRooms = async () => {
         if (!schedule) {
           continue;
         }
+        let options = [];
 
+        try {
+          options =
+            typeof reservation.options === "string"
+              ? JSON.parse(reservation.options)
+              : reservation.options || [];
+        } catch {
+          options = [];
+        }
         schedule.push({
           source: "website",
 
@@ -4222,7 +4233,8 @@ export const syncNaverBookingsToRooms = async () => {
           phone: reservation.buyer_tel,
 
           price: reservation.total_amount,
-
+          booking_option: options,
+          request_memo: reservation.memo || null,
           qty: 1,
         });
       }
