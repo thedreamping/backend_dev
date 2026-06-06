@@ -3720,7 +3720,7 @@ app.get("/api/reservation_history", async (req, res) => {
         qty,
         price,
 
-        product_name,
+  
 
         memo,
 
@@ -3931,7 +3931,6 @@ export const syncNaverBookingsToRooms = async () => {
         total_amount,
         check_in,
         check_out,
-        product_name,
         options,
         memo,
         qty
