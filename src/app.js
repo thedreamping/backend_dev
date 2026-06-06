@@ -2455,6 +2455,7 @@ app.post("/api/payment/return", async (req, res) => {
     return res.redirect("https://dreamping.co.kr/shopinfo/payment-cancel.html");
   } finally {
     conn.release();
+    syncNaverBookingsToRooms();
   }
 });
 
@@ -3061,6 +3062,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     return res.redirect("https://dreamping.co.kr/shopinfo/payment-cancel.html");
   } finally {
     conn.release();
+    syncNaverBookingsToRooms();
   }
 });
 function getTimestamp() {
