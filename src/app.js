@@ -2028,7 +2028,7 @@ app.post("/api/reservation", async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
-        null,
+        roomInfo.room_group_id,
         roomInfo.room_group_id,
         check_in,
         check_out,
