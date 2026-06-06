@@ -4161,6 +4161,9 @@ export const syncNaverBookingsToRooms = async () => {
             original_qty: s.qty,
             check_in: s.check_in,
             check_out: s.check_out,
+            product_name: group.name, // or room group name
+            request_memo: period.request_memo || null,
+            booking_option: period.booking_option || [],
           };
 
           const [exists] = await conn.query(
