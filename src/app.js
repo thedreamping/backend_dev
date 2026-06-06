@@ -3283,6 +3283,7 @@ app.post("/api/reservation/refund", async (req, res) => {
     });
   } finally {
     conn.release();
+    syncNaverBookingsToRooms();
   }
 });
 
