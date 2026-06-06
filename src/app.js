@@ -3999,7 +3999,7 @@ export const syncNaverBookingsToRooms = async () => {
             phone: b.phone,
             price: b.price,
             qty: b.qty,
-            booking_option: safeParse(b.booking_option),
+            booking_option: b.booking_option,
             request_memo: b.request_memo,
           });
         }
