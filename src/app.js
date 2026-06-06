@@ -3999,8 +3999,8 @@ export const syncNaverBookingsToRooms = async () => {
             phone: b.phone,
             price: b.price,
             qty: b.qty,
-            booking_option: b.booking_option,
-            request_memo: b.request_memo,
+            booking_option: b.booking_option || "",
+            request_memo: b.request_memo || "",
           });
         }
       }
@@ -4018,8 +4018,8 @@ export const syncNaverBookingsToRooms = async () => {
           phone: r.buyer_tel,
           price: r.total_amount,
           qty: r.qty,
-          booking_option: safeParse(r.options),
-          request_memo: r.memo,
+          booking_option: safeParse(r.options) || "",
+          request_memo: r.memo || "",
         });
       }
 
