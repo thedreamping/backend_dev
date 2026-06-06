@@ -4054,6 +4054,8 @@ export const syncNaverBookingsToRooms = async () => {
                 price: period.price,
                 qty_index: q + 1,
                 qty_total: qty,
+                booking_option: period.booking_option, // ✔ 추가
+                request_memo: period.request_memo, // ✔ 추가
               });
               assigned = true;
               break;
@@ -4080,6 +4082,8 @@ export const syncNaverBookingsToRooms = async () => {
                   price: period.price,
                   qty_index: q + 1,
                   qty_total: qty,
+                  booking_option: period.booking_option, // ✔ 추가
+                  request_memo: period.request_memo, // ✔ 추가
                 });
 
                 console.log(
