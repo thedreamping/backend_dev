@@ -2028,7 +2028,7 @@ app.post("/api/reservation", async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
-        roomInfo.room_group_id,
+        null,
         roomInfo.room_group_id,
         check_in,
         check_out,
@@ -4085,6 +4085,29 @@ export const syncNaverBookingsToRooms = async () => {
     `);
 
     // =====================================================
+    // 홈페이지 예약 조회
+    // =====================================================
+
+    const [siteReservations] = await conn.query(`
+      SELECT
+        id,
+        room_id,
+        room_group_id,
+        buyer_name,
+        buyer_tel,
+        total_amount,
+        check_in,
+        check_out,
+        status,
+        created_at
+      FROM reservations_info
+      WHERE
+        status = 'PAID'
+        AND check_out >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+      ORDER BY check_in ASC, created_at ASC
+    `);
+
+    // =====================================================
     // 살아있는 booking_id 목록
     // =====================================================
 
@@ -4166,6 +4189,42 @@ export const syncNaverBookingsToRooms = async () => {
 
       for (const room of rooms) {
         roomSchedules.set(room.id, []);
+      }
+
+      // =====================================================
+      // 홈페이지 예약 선적재
+      // =====================================================
+
+      for (const reservation of siteReservations) {
+        if (Number(reservation.room_group_id) !== Number(groupId)) {
+          continue;
+        }
+
+        if (!reservation.room_id) {
+          continue;
+        }
+
+        const schedule = roomSchedules.get(reservation.room_id);
+
+        if (!schedule) {
+          continue;
+        }
+
+        schedule.push({
+          source: "website",
+
+          reservation_id: reservation.id,
+
+          check_in: toKSTDate(reservation.check_in),
+          check_out: toKSTDate(reservation.check_out),
+
+          name: reservation.buyer_name,
+          phone: reservation.buyer_tel,
+
+          price: reservation.total_amount,
+
+          qty: 1,
+        });
       }
 
       // =====================================================
@@ -4287,12 +4346,22 @@ export const syncNaverBookingsToRooms = async () => {
         // =====================================================
 
         for (const s of schedule) {
+          const historyBookingId =
+            s.source === "website"
+              ? `SITE_${s.reservation_id}`
+              : String(s.booking_id);
+
           const payload = {
-            booking_id: s.booking_id,
+            booking_id: historyBookingId,
+
+            reservation_id: s.reservation_id || null,
+
             name: s.name,
             phone: s.phone,
+
             price: s.price,
             qty: s.qty,
+
             product_name: s.product_name,
 
             booking_option: s.booking_option,
@@ -4304,16 +4373,16 @@ export const syncNaverBookingsToRooms = async () => {
 
           const [existsRows] = await conn.query(
             `
-            SELECT id
-            FROM room_booking_history
-            WHERE
-              booking_id = ?
-              AND room_id = ?
-              AND check_in = ?
-              AND check_out = ?
-            LIMIT 1
-          `,
-            [s.booking_id, room.id, s.check_in, s.check_out],
+    SELECT id
+    FROM room_booking_history
+    WHERE
+      booking_id = ?
+      AND room_id = ?
+      AND check_in = ?
+      AND check_out = ?
+    LIMIT 1
+    `,
+            [historyBookingId, room.id, s.check_in, s.check_out],
           );
 
           // =====================================================
@@ -4397,7 +4466,7 @@ export const syncNaverBookingsToRooms = async () => {
               [
                 JSON.stringify(payload),
 
-                s.booking_id || null,
+                historyBookingId,
 
                 s.check_in,
                 s.check_out,
