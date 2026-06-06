@@ -3720,7 +3720,7 @@ app.get("/api/reservation_history", async (req, res) => {
         qty,
         price,
 
-  
+        product_name,
 
         memo,
 
@@ -3932,8 +3932,7 @@ export const syncNaverBookingsToRooms = async () => {
         check_in,
         check_out,
         options,
-        memo,
-        qty
+        memo
       FROM reservations_info
       WHERE status = 'PAID'
         AND check_out >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
@@ -3999,8 +3998,8 @@ export const syncNaverBookingsToRooms = async () => {
             phone: b.phone,
             price: b.price,
             qty: b.qty,
-            booking_option: b.booking_option || "",
-            request_memo: b.request_memo || "",
+            booking_option: safeParse(b.booking_option),
+            request_memo: b.request_memo,
           });
         }
       }
@@ -4017,9 +4016,9 @@ export const syncNaverBookingsToRooms = async () => {
           name: r.buyer_name,
           phone: r.buyer_tel,
           price: r.total_amount,
-          qty: r.qty,
-          booking_option: safeParse(r.options) || "",
-          request_memo: r.memo || "",
+          qty: 1,
+          booking_option: safeParse(r.options),
+          request_memo: r.memo,
         });
       }
 
@@ -4035,6 +4034,7 @@ export const syncNaverBookingsToRooms = async () => {
         for (let q = 0; q < qty; q++) {
           let assigned = false;
 
+          // 1차 배정
           for (const room of rooms) {
             const schedule = roomSchedules.get(room.id);
 
@@ -4043,26 +4043,13 @@ export const syncNaverBookingsToRooms = async () => {
             );
 
             if (!strictOverlap) {
-              schedule.push({
-                source: period.source,
-                booking_id: period.booking_id,
-                reservation_id: period.reservation_id,
-                check_in: period.check_in,
-                check_out: period.check_out,
-                name: period.name,
-                phone: period.phone,
-                price: period.price,
-                qty: period.qty,
-                qty_index: q + 1,
-                qty_total: qty,
-                booking_option: period.booking_option,
-                request_memo: period.request_memo,
-              });
+              schedule.push(period);
               assigned = true;
               break;
             }
           }
 
+          // 2차 바톤터치
           if (!assigned) {
             for (const room of rooms) {
               const schedule = roomSchedules.get(room.id);
@@ -4072,22 +4059,7 @@ export const syncNaverBookingsToRooms = async () => {
               );
 
               if (!relaxedOverlap) {
-                schedule.push({
-                  source: period.source,
-                  booking_id: period.booking_id,
-                  reservation_id: period.reservation_id,
-                  check_in: period.check_in,
-                  check_out: period.check_out,
-                  name: period.name,
-                  phone: period.phone,
-                  price: period.price,
-                  qty_index: q + 1,
-                  qty_total: qty,
-                  qty: period.qty,
-                  booking_option: period.booking_option, // ✔ 추가
-                  request_memo: period.request_memo, // ✔ 추가
-                });
-
+                schedule.push(period);
                 console.log(
                   `[바톤터치] ${period.booking_id || period.reservation_id}`,
                 );
@@ -4098,11 +4070,7 @@ export const syncNaverBookingsToRooms = async () => {
           }
 
           if (!assigned) {
-            console.warn(
-              "[FAIL]",
-              period.booking_id || period.reservation_id,
-              q,
-            );
+            console.warn("[FAIL]", period.booking_id || period.reservation_id);
           }
         }
       }
@@ -4120,56 +4088,29 @@ export const syncNaverBookingsToRooms = async () => {
 
         await conn.query(
           `
-           UPDATE room
-            SET
-              is_active = 0,
-              available = 0,
-              disable_start = ?,
-              disable_end = ?,
-              check_in = ?,
-              check_out = ?,
-              check_in_and_out = ?,
-              naver_crawling_info = ?,
-              is_ota = 1
-            WHERE id = ?
+          UPDATE room
+          SET
+            is_active = 0,
+            available = 0,
+            disable_start = ?,
+            disable_end = ?,
+            check_in = ?,
+            check_out = ?,
+            check_in_and_out = ?
+          WHERE id = ?
         `,
           [
             first.check_in,
             first.check_out,
             first.check_in,
             first.check_out,
-
             JSON.stringify(
               schedule.map((s) => ({
                 check_in: s.check_in,
                 check_out: s.check_out,
                 source: s.source,
-                booking_option: s.booking_option,
-                request_memo: s.request_memo,
               })),
             ),
-
-            JSON.stringify(
-              schedule.map((s) => ({
-                booking_id: s.booking_id,
-                reservation_id: s.reservation_id,
-
-                name: s.name,
-                phone: s.phone,
-
-                product_name: group.name,
-
-                qty: s.qty,
-                price: s.price,
-
-                booking_option: s.booking_option,
-                request_memo: s.request_memo,
-
-                check_in: s.check_in,
-                check_out: s.check_out,
-              })),
-            ),
-
             room.id,
           ],
         );
@@ -4180,23 +4121,20 @@ export const syncNaverBookingsToRooms = async () => {
         for (const s of schedule) {
           const bookingId =
             s.source === "website"
-              ? `SITE_${s.reservation_id}_${s.qty_index}`
-              : `${s.booking_id}_${s.qty_index}`;
+              ? `SITE_${s.reservation_id}`
+              : String(s.booking_id);
 
           const payload = {
             booking_id: bookingId,
             reservation_id: s.reservation_id || null,
-            qty_index: s.qty_index,
-            qty_total: s.qty_total,
             name: s.name,
             phone: s.phone,
             price: s.price,
-            original_qty: s.qty,
+            qty: s.qty,
+            booking_option: s.booking_option,
+            request_memo: s.request_memo,
             check_in: s.check_in,
             check_out: s.check_out,
-            product_name: group.name, // or room group name
-            request_memo: s.request_memo || null,
-            booking_option: s.booking_option || [],
           };
 
           const [exists] = await conn.query(
@@ -4235,9 +4173,10 @@ export const syncNaverBookingsToRooms = async () => {
                 guest_phone,
                 qty,
                 price,
+                product_name,
                 canceled
               )
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             `,
               [
                 JSON.stringify(payload),
@@ -4251,6 +4190,7 @@ export const syncNaverBookingsToRooms = async () => {
                 s.phone,
                 s.qty,
                 s.price,
+                s.product_name || null,
               ],
             );
           }
