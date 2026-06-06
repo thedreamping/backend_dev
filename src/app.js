@@ -4098,7 +4098,7 @@ export const syncNaverBookingsToRooms = async () => {
             disable_end = ?,
             check_in = ?,
             check_out = ?,
-            check_in_and_out = ?
+            check_in_and_out = ?,
             naver_crawling_info = ?
           WHERE id = ?
         `,
