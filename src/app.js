@@ -3933,7 +3933,8 @@ export const syncNaverBookingsToRooms = async () => {
         check_in,
         check_out,
         options,
-        memo
+        memo,
+        qty
       FROM reservations_info
       WHERE status = 'PAID'
         AND check_out >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
@@ -4017,7 +4018,7 @@ export const syncNaverBookingsToRooms = async () => {
           name: r.buyer_name,
           phone: r.buyer_tel,
           price: r.total_amount,
-          qty: 1,
+          qty: r.qty,
           booking_option: safeParse(r.options),
           request_memo: r.memo,
         });
