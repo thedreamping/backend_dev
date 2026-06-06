@@ -3862,6 +3862,7 @@ app.get("/api/reservation_infos", async (req, res) => {
     if (conn) conn.release();
   }
 });
+
 export const syncNaverBookingsToRooms = async () => {
   const conn = await pool.getConnection();
 
@@ -4097,6 +4098,7 @@ export const syncNaverBookingsToRooms = async () => {
             check_in = ?,
             check_out = ?,
             check_in_and_out = ?
+            naver_crawling_info = ?
           WHERE id = ?
         `,
           [
@@ -4109,6 +4111,24 @@ export const syncNaverBookingsToRooms = async () => {
                 check_in: s.check_in,
                 check_out: s.check_out,
                 source: s.source,
+              })),
+            ),
+            JSON.stringify(
+              schedule.map((s) => ({
+                booking_id: s.booking_id,
+                reservation_id: s.reservation_id,
+
+                name: s.name,
+                phone: s.phone,
+
+                price: s.price,
+                qty: s.qty,
+
+                booking_option: s.booking_option,
+                request_memo: s.request_memo,
+
+                check_in: s.check_in,
+                check_out: s.check_out,
               })),
             ),
             room.id,
