@@ -3877,9 +3877,8 @@ export const syncNaverBookingsToRooms = async () => {
     }
   };
 
-  const isOverlap = (list, start, end) => {
-    return list.some((s) => start <= s.check_out && s.check_in <= end);
-  };
+  const isOverlap = (list, start, end) =>
+    list.some((s) => start <= s.check_out && s.check_in <= end);
 
   try {
     await conn.beginTransaction();
@@ -3887,7 +3886,7 @@ export const syncNaverBookingsToRooms = async () => {
     console.log("🟡 [SYNC] 시작", new Date().toISOString());
 
     // =====================================================
-    // 1. 그룹 조회
+    // 1. groups
     // =====================================================
     const [groups] = await conn.query(`
       SELECT id, name
@@ -3913,11 +3912,11 @@ export const syncNaverBookingsToRooms = async () => {
       FROM naver_bookings
       WHERE cancel_date2 IS NULL
         AND check_out >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-      ORDER BY check_in ASC, created_at ASC
+      ORDER BY check_in ASC
     `);
 
     // =====================================================
-    // 3. website reservations (핵심: room_id 무시)
+    // 3. website reservations (room_id 무시)
     // =====================================================
     const [siteReservations] = await conn.query(`
       SELECT
@@ -3933,20 +3932,14 @@ export const syncNaverBookingsToRooms = async () => {
       FROM reservations_info
       WHERE status = 'PAID'
         AND check_out >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-      ORDER BY check_in ASC, created_at ASC
+      ORDER BY check_in ASC
     `);
 
     // =====================================================
-    // 4. 그룹 초기화
+    // 4. reset
     // =====================================================
-    await conn.query(`
-      UPDATE room_group
-      SET check_in_and_out = JSON_ARRAY()
-    `);
+    await conn.query(`UPDATE room_group SET check_in_and_out = JSON_ARRAY()`);
 
-    // =====================================================
-    // 5. room 초기화 (핵심: sync가 전부 재구성)
-    // =====================================================
     await conn.query(`
       UPDATE room
       SET
@@ -3962,7 +3955,7 @@ export const syncNaverBookingsToRooms = async () => {
     `);
 
     // =====================================================
-    // 6. 그룹별 처리
+    // 5. group loop
     // =====================================================
     for (const group of groups) {
       const groupId = group.id;
@@ -3973,35 +3966,26 @@ export const syncNaverBookingsToRooms = async () => {
         return n;
       };
 
-      // =====================================================
-      // 6-1. 해당 그룹 rooms
-      // =====================================================
+      // rooms
       const [rooms] = await conn.query(
-        `
-        SELECT id
-        FROM room
-        WHERE room_group_id = ?
-        ORDER BY id ASC
-      `,
+        `SELECT id FROM room WHERE room_group_id = ? ORDER BY id ASC`,
         [groupId],
       );
 
       const roomSchedules = new Map();
-      for (const room of rooms) {
-        roomSchedules.set(room.id, []);
-      }
+      for (const r of rooms) roomSchedules.set(r.id, []);
 
       // =====================================================
-      // 6-2. booking + website 통합
+      // 5-1. booking + website 합치기 (핵심)
       // =====================================================
-      const groupBookings = [];
+      const allPeriods = [];
 
       for (const b of bookings) {
         const product = normalizeProduct(b.product_name);
         const gname = normalize(group.name);
 
         if (product.includes(gname) || gname.includes(product)) {
-          groupBookings.push({
+          allPeriods.push({
             source: "naver",
             booking_id: b.booking_id,
             check_in: toKSTDate(b.check_in),
@@ -4019,7 +4003,7 @@ export const syncNaverBookingsToRooms = async () => {
       for (const r of siteReservations) {
         if (Number(r.room_group_id) !== Number(groupId)) continue;
 
-        groupBookings.push({
+        allPeriods.push({
           source: "website",
           reservation_id: r.id,
           booking_id: `SITE_${r.id}`,
@@ -4035,9 +4019,9 @@ export const syncNaverBookingsToRooms = async () => {
       }
 
       // =====================================================
-      // 6-3. 배정 (핵심 로직)
+      // 5-2. 배정 (바톤터치 유지 핵심)
       // =====================================================
-      for (const period of groupBookings) {
+      for (const period of allPeriods) {
         const start = period.check_in;
         const end = period.check_out;
 
@@ -4046,27 +4030,46 @@ export const syncNaverBookingsToRooms = async () => {
         for (const room of rooms) {
           const schedule = roomSchedules.get(room.id);
 
-          const overlap = schedule.some(
+          const strictOverlap = schedule.some(
             (s) => start <= s.check_out && s.check_in <= end,
           );
 
-          if (!overlap) {
+          if (!strictOverlap) {
             schedule.push(period);
             assigned = true;
             break;
           }
         }
 
+        // ==============================
+        // 🔥 바톤터치 허용
+        // ==============================
         if (!assigned) {
-          console.warn(
-            "[배정 실패]",
-            period.booking_id || period.reservation_id,
-          );
+          for (const room of rooms) {
+            const schedule = roomSchedules.get(room.id);
+
+            const relaxedOverlap = schedule.some(
+              (s) => start < s.check_out && s.check_in < end,
+            );
+
+            if (!relaxedOverlap) {
+              schedule.push(period);
+              console.log(
+                `[바톤터치] ${period.booking_id || period.reservation_id}`,
+              );
+              assigned = true;
+              break;
+            }
+          }
+        }
+
+        if (!assigned) {
+          console.warn("[FAIL]", period.booking_id || period.reservation_id);
         }
       }
 
       // =====================================================
-      // 6-4. room + history 저장
+      // 5-3. 저장
       // =====================================================
       for (const room of rooms) {
         const schedule = roomSchedules.get(room.id);
@@ -4076,7 +4079,6 @@ export const syncNaverBookingsToRooms = async () => {
 
         const first = schedule[0];
 
-        // room update
         await conn.query(
           `
           UPDATE room
@@ -4106,15 +4108,17 @@ export const syncNaverBookingsToRooms = async () => {
           ],
         );
 
-        // history upsert
+        // =====================================================
+        // history
+        // =====================================================
         for (const s of schedule) {
-          const historyBookingId =
+          const bookingId =
             s.source === "website"
               ? `SITE_${s.reservation_id}`
               : String(s.booking_id);
 
           const payload = {
-            booking_id: historyBookingId,
+            booking_id: bookingId,
             reservation_id: s.reservation_id || null,
             name: s.name,
             phone: s.phone,
@@ -4135,7 +4139,7 @@ export const syncNaverBookingsToRooms = async () => {
               AND check_out = ?
             LIMIT 1
           `,
-            [historyBookingId, room.id, s.check_in, s.check_out],
+            [bookingId, room.id, s.check_in, s.check_out],
           );
 
           if (exists.length) {
@@ -4169,7 +4173,7 @@ export const syncNaverBookingsToRooms = async () => {
             `,
               [
                 JSON.stringify(payload),
-                historyBookingId,
+                bookingId,
                 s.check_in,
                 s.check_out,
                 room.id,
@@ -4187,33 +4191,7 @@ export const syncNaverBookingsToRooms = async () => {
       }
     }
 
-    // =====================================================
-    // 7. 취소 감지
-    // =====================================================
-    const [historyRows] = await conn.query(`
-      SELECT id, booking_id
-      FROM room_booking_history
-      WHERE source = 'naver'
-        AND canceled = 0
-    `);
-
-    const aliveBookingIds = new Set(bookings.map((b) => String(b.booking_id)));
-
-    for (const row of historyRows) {
-      if (!aliveBookingIds.has(String(row.booking_id))) {
-        await conn.query(
-          `
-          UPDATE room_booking_history
-          SET canceled = 1
-          WHERE id = ?
-        `,
-          [row.id],
-        );
-      }
-    }
-
     await conn.commit();
-
     console.log("🟢 [SYNC 완료]");
   } catch (err) {
     await conn.rollback();
