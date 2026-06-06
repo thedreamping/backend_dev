@@ -4009,8 +4009,9 @@ export const syncNaverBookingsToRooms = async () => {
 
       for (const r of siteReservations) {
         if (Number(r.room_group_id) !== Number(groupId)) continue;
-
+        const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
         allPeriods.push({
+          product_name: groupNameMap.get(r.room_group_id),
           source: "website",
           reservation_id: r.id,
           booking_id: `SITE_${r.id}`,
