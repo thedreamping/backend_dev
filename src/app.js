@@ -3994,6 +3994,7 @@ export const syncNaverBookingsToRooms = async () => {
           allPeriods.push({
             source: "naver",
             booking_id: b.booking_id,
+            product_name: b.product_name,
             check_in: toKSTDate(b.check_in),
             check_out: toKSTDate(b.check_out),
             name: b.name,
@@ -4118,7 +4119,7 @@ export const syncNaverBookingsToRooms = async () => {
               schedule.map((s) => ({
                 booking_id: s.booking_id,
                 reservation_id: s.reservation_id,
-
+                product_name: s.product_name,
                 name: s.name,
                 phone: s.phone,
 
