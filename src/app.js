@@ -2040,8 +2040,9 @@ app.post("/api/reservation", async (req, res) => {
         phone.trim(),
         email ? email.trim() : null,
         memo ? memo.trim() : null,
-        qty,
+        
         options ? JSON.stringify(options) : null,
+        qty,
       ],
     );
 
