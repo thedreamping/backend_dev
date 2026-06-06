@@ -2040,7 +2040,6 @@ app.post("/api/reservation", async (req, res) => {
         phone.trim(),
         email ? email.trim() : null,
         memo ? memo.trim() : null,
-        
         options ? JSON.stringify(options) : null,
         qty,
       ],
@@ -4156,6 +4155,7 @@ export const syncNaverBookingsToRooms = async () => {
           const payload = {
             booking_id: bookingId,
             reservation_id: s.reservation_id || null,
+            product_name: s.product_name,
             name: s.name,
             phone: s.phone,
             price: s.price,
