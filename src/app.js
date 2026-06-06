@@ -4201,7 +4201,7 @@ export const syncNaverBookingsToRooms = async () => {
                 price,
                 canceled
               )
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             `,
               [
                 JSON.stringify(payload),
