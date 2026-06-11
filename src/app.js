@@ -2734,7 +2734,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
       await conn.rollback();
       console.log("auth_fail");
       return res.redirect(
-        "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+        "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
       );
     }
     console.log("auth_success");
@@ -2757,7 +2757,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
       await conn.rollback();
       console.log("auth_fail2");
       return res.redirect(
-        "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+        "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
       );
     }
 
@@ -2783,7 +2783,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
         await conn.rollback();
 
         return res.redirect(
-          "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+          "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
         );
     }
 
@@ -2794,7 +2794,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
       await conn.rollback();
 
       return res.redirect(
-        "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+        "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
       );
     }
 
@@ -2853,7 +2853,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
       await conn.commit();
 
       return res.redirect(
-        "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+        "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
       );
     }
 
@@ -2886,7 +2886,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
       await conn.rollback();
 
       return res.redirect(
-        "https://dreamping.co.kr/shopinfo/payment-success.html",
+        "https://thedreamping2026.cafe24.com/shopinfo/payment-success.html",
       );
     }
 
