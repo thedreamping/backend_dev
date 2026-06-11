@@ -2432,6 +2432,11 @@ app.post("/api/payment/return", async (req, res) => {
         from: process.env.SOLAPI_FROM_NUMBER,
         text: `[드림핑] 예약 완료\n${reservation.buyer_name} 님 예약이 완료되었습니다.\n예약번호: ${reservation.id}\n상품: ${productName}\n체크인:${formatDateForSms(reservation.check_in)}\n체크아웃:${formatDateForSms(reservation.check_out)}\n\n감사합니다.`,
       });
+    } catch (smsErr) {
+      console.error("SMS send failed:", smsErr.message);
+    }
+
+    try {
       await messageService.send({
         to: "01068669088",
         from: process.env.SOLAPI_FROM_NUMBER,
@@ -3050,6 +3055,13 @@ app.post("/api/payment/mobile/return", async (req, res) => {
           from: process.env.SOLAPI_FROM_NUMBER,
           text: text,
         });
+      }
+    } catch (smsErr) {
+      console.error("SMS send failed:", smsErr.message);
+    }
+
+    try {
+      if (reservation.buyer_tel) {
         await messageService.send({
           to: "01068669088",
           from: process.env.SOLAPI_FROM_NUMBER,
@@ -3059,6 +3071,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     } catch (smsErr) {
       console.error("SMS send failed:", smsErr.message);
     }
+
     await conn.commit();
 
     // =========================
@@ -3072,7 +3085,9 @@ app.post("/api/payment/mobile/return", async (req, res) => {
 
     console.error("mobile return error:", error);
 
-    return res.redirect("https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html");
+    return res.redirect(
+      "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
+    );
   } finally {
     conn.release();
     syncNaverBookingsToRooms();
