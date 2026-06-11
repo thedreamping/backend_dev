@@ -2105,8 +2105,8 @@ app.post("/api/payment/ready", async (req, res) => {
 
     const oid = `ORD-${reservation.id}-${Date.now()}`;
     const timestamp = Date.now().toString();
-    //const price = reservation.total_amount.toString();
-    const price = "1000";
+    const price = reservation.total_amount.toString();
+    //const price = "1000";
     const signature = crypto
       .createHash("sha256")
       .update(`oid=${oid}&price=${price}&timestamp=${timestamp}`)
@@ -2432,6 +2432,11 @@ app.post("/api/payment/return", async (req, res) => {
         from: process.env.SOLAPI_FROM_NUMBER,
         text: `[드림핑] 예약 완료\n${reservation.buyer_name} 님 예약이 완료되었습니다.\n예약번호: ${reservation.id}\n상품: ${productName}\n체크인:${formatDateForSms(reservation.check_in)}\n체크아웃:${formatDateForSms(reservation.check_out)}\n\n감사합니다.`,
       });
+      await messageService.send({
+        to: "01068669088",
+        from: process.env.SOLAPI_FROM_NUMBER,
+        text: `[드림핑] 예약 완료\n${reservation.buyer_name} 님 예약이 완료되었습니다.\n예약번호: ${reservation.id}\n상품: ${productName}\n체크인:${formatDateForSms(reservation.check_in)}\n체크아웃:${formatDateForSms(reservation.check_out)}\n\n감사합니다.`,
+      });
     } catch (smsErr) {
       console.error("SMS send failed:", smsErr.message);
     }
@@ -2532,8 +2537,8 @@ app.get("/api/payment/mobile/start/:reservationId", async (req, res) => {
 
     const signKey = process.env.INICIS_SIGN_KEY;
 
-    //const price = String(Number(reservation.total_amount));
-    const price = "1000";
+    const price = String(Number(reservation.total_amount));
+    //const price = "1000";
     const timestamp = Date.now();
 
     // =========================
@@ -2889,7 +2894,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     // 9. 금액 검증
     // =========================
 
-    const IS_MOBILE_TEST = true;
+    const IS_MOBILE_TEST = false;
     if (IS_MOBILE_TEST) {
       if (Number(result.P_AMT) !== 1000) {
         console.log(1000_01);
@@ -3042,6 +3047,11 @@ app.post("/api/payment/mobile/return", async (req, res) => {
       if (reservation.buyer_tel) {
         await messageService.send({
           to: reservation.buyer_tel,
+          from: process.env.SOLAPI_FROM_NUMBER,
+          text: text,
+        });
+        await messageService.send({
+          to: "01068669088",
           from: process.env.SOLAPI_FROM_NUMBER,
           text: text,
         });
