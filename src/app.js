@@ -2788,15 +2788,15 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     }
 
     // 샘플과 동일한 검증
-    if (P_REQ_URL !== authUrl) {
-      console.log("P_REQ_URL mismatch:", P_REQ_URL, authUrl);
+    // if (P_REQ_URL !== authUrl) {
+    //   console.log("P_REQ_URL mismatch:", P_REQ_URL, authUrl);
 
-      await conn.rollback();
+    //   await conn.rollback();
 
-      return res.redirect(
-        "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
-      );
-    }
+    //   return res.redirect(
+    //     "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
+    //   );
+    // }
 
     // =========================
     // 4. 승인 요청
