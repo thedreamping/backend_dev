@@ -2899,7 +2899,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
       if (Number(result.P_AMT) !== 1000) {
         console.log(1000_01);
         return res.redirect(
-          "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+          "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
         );
       }
     } else {
@@ -2918,7 +2918,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
         await conn.commit();
         console.log(1000_02);
         return res.redirect(
-          "https://dreamping.co.kr/shopinfo/payment-cancel.html",
+          "https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html",
         );
       }
     }
@@ -3065,14 +3065,14 @@ app.post("/api/payment/mobile/return", async (req, res) => {
     // 14. 성공 이동
     // =========================
     return res.redirect(
-      `https://dreamping.co.kr/shopinfo/payment-success.html?reservationId=${reservation.id}`,
+      `https://thedreamping2026.cafe24.com/shopinfo/payment-success.html?reservationId=${reservation.id}`,
     );
   } catch (error) {
     await conn.rollback();
 
     console.error("mobile return error:", error);
 
-    return res.redirect("https://dreamping.co.kr/shopinfo/payment-cancel.html");
+    return res.redirect("https://thedreamping2026.cafe24.com/shopinfo/payment-cancel.html");
   } finally {
     conn.release();
     syncNaverBookingsToRooms();
