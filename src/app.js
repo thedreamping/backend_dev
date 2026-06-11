@@ -2807,7 +2807,7 @@ app.post("/api/payment/mobile/return", async (req, res) => {
 
     params.append("P_TID", P_TID);
     console.log("before_auto");
-    const authResponse = await axios.post(authUrl, params.toString(), {
+    const authResponse = await axios.post(P_REQ_URL, params.toString(), {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
