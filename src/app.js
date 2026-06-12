@@ -3907,9 +3907,6 @@ export const syncNaverBookingsToRooms = async () => {
     }
   };
 
-  const isOverlap = (list, start, end) =>
-    list.some((s) => start <= s.check_out && s.check_in <= end);
-
   try {
     await conn.beginTransaction();
 
@@ -3935,6 +3932,7 @@ export const syncNaverBookingsToRooms = async () => {
         product_name,
         qty,
         price,
+        payment_date,
         check_in,
         check_out,
         booking_option,
@@ -4020,6 +4018,7 @@ export const syncNaverBookingsToRooms = async () => {
             source: "naver",
             booking_id: b.booking_id,
             product_name: b.product_name,
+            payment_date: b.payment_date,
             check_in: toKSTDate(b.check_in),
             check_out: toKSTDate(b.check_out),
             name: b.name,
@@ -4031,10 +4030,10 @@ export const syncNaverBookingsToRooms = async () => {
           });
         }
       }
-
+      const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
       for (const r of siteReservations) {
         if (Number(r.room_group_id) !== Number(groupId)) continue;
-        const groupNameMap = new Map(groups.map((g) => [g.id, g.name]));
+
         allPeriods.push({
           product_name: groupNameMap.get(r.room_group_id),
           source: "website",
@@ -4152,6 +4151,7 @@ export const syncNaverBookingsToRooms = async () => {
                 booking_id: s.booking_id,
                 reservation_id: s.reservation_id,
                 product_name: s.product_name,
+                payment_date: s.payment_date || null,
                 name: s.name,
                 phone: s.phone,
 
@@ -4182,6 +4182,7 @@ export const syncNaverBookingsToRooms = async () => {
             booking_id: bookingId,
             reservation_id: s.reservation_id || null,
             product_name: s.product_name,
+            payment_date: s.payment_date || null,
             name: s.name,
             phone: s.phone,
             price: s.price,
