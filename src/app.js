@@ -1158,9 +1158,11 @@ app.get("/api/get-main-event-popup", async (req, res) => {
     });
   }
 });
+
 app.post("/api/room-price", verifyToken, async (req, res) => {
   try {
     const { dates, rooms } = req.body;
+    console.log(rooms);
 
     if (!Array.isArray(dates) || !Array.isArray(rooms)) {
       return res.status(400).json({
@@ -1174,6 +1176,7 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
     for (const date of dates) {
       for (const room of rooms) {
         const price = Number(room.price);
+        const humanPlusPrice = Number(room.human_plus_price || 0);
 
         if (!room.room_group_id || !room.room_group_name) continue;
         if (!price || price <= 0) continue;
@@ -1183,6 +1186,7 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
           date,
           price,
           room.room_group_name,
+          humanPlusPrice,
         ]);
       }
     }
@@ -1195,10 +1199,10 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
     }
 
     const conn = await pool.getConnection();
+
     await conn.beginTransaction();
 
     try {
-      // 🔥 날짜 기준 전체 삭제
       const placeholders = dates.map(() => "?").join(",");
 
       await conn.query(
@@ -1206,11 +1210,16 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
         dates,
       );
 
-      // 🔥 새로 INSERT
       await conn.query(
         `
-        INSERT INTO room_price 
-        (room_group_id, date, price, room_group_name)
+        INSERT INTO room_price
+        (
+          room_group_id,
+          date,
+          price,
+          room_group_name,
+          human_plus_price
+        )
         VALUES ?
         `,
         [insertValues],
@@ -1230,6 +1239,7 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
     }
   } catch (error) {
     console.error("room_price replace error:", error);
+
     return res.status(500).json({
       ok: false,
       message: "객실 가격 저장 중 오류 발생",
@@ -1250,10 +1260,8 @@ app.get("/api/room-price", async (req, res) => {
 
     month = String(month).padStart(2, "0");
 
-    // 시작일
     const startDate = `${year}-${month}-01`;
 
-    // 다음 달 계산
     const nextMonthDate = new Date(Number(year), Number(month), 1);
     const nextYear = nextMonthDate.getFullYear();
     const nextMonthStr = String(nextMonthDate.getMonth() + 1).padStart(2, "0");
@@ -1265,6 +1273,7 @@ app.get("/api/room-price", async (req, res) => {
         room_group_id,
         room_group_name,
         price,
+        human_plus_price,
         DATE_FORMAT(date, '%Y-%m-%d') AS date
       FROM room_price
       WHERE date >= ? AND date < ?
@@ -1272,9 +1281,9 @@ app.get("/api/room-price", async (req, res) => {
 
     const params = [startDate, endDate];
 
-    // roomId 선택 조건
     if (roomId !== undefined && roomId !== null && roomId !== "") {
       const parsedRoomId = Number(roomId);
+
       if (!isNaN(parsedRoomId)) {
         query += ` AND room_group_id = ?`;
         params.push(parsedRoomId);
@@ -1291,6 +1300,7 @@ app.get("/api/room-price", async (req, res) => {
     });
   } catch (error) {
     console.error("room_price fetch error:", error);
+
     return res.status(500).json({
       ok: false,
       message: "객실 가격 조회 중 오류 발생",
