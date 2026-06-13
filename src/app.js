@@ -1176,6 +1176,7 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
     for (const date of dates) {
       for (const room of rooms) {
         const price = Number(room.price);
+        const dayUsePrice = Number(room.day_use_price || 0);
         const humanPlusPrice = Number(room.human_plus_price || 0);
 
         if (!room.room_group_id || !room.room_group_name) continue;
@@ -1186,6 +1187,7 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
           date,
           price,
           room.room_group_name,
+          dayUsePrice,
           humanPlusPrice,
         ]);
       }
@@ -1218,6 +1220,7 @@ app.post("/api/room-price", verifyToken, async (req, res) => {
           date,
           price,
           room_group_name,
+          day_use_price,
           human_plus_price
         )
         VALUES ?
@@ -1273,6 +1276,7 @@ app.get("/api/room-price", async (req, res) => {
         room_group_id,
         room_group_name,
         price,
+        day_use_price,
         human_plus_price,
         DATE_FORMAT(date, '%Y-%m-%d') AS date
       FROM room_price
