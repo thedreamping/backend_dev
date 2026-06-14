@@ -820,6 +820,7 @@ app.post("/api/main-room-banner", upload.array("file"), async (req, res) => {
     const title = normalizeToArray(req.body.title);
     const link = normalizeToArray(req.body.link);
     const file_url = normalizeToArray(req.body.file_url);
+    const show = normalizeToArray(req.body.show);
     const file_index = normalizeToArray(req.body.file_index); // 새 파일의 슬라이드 index
 
     // 필수값 체크
@@ -863,10 +864,10 @@ app.post("/api/main-room-banner", upload.array("file"), async (req, res) => {
 
       await pool.query(
         `
-        INSERT INTO main_room_banners (file_name, text, link, file_url, title)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO main_room_banners (file_name, text, link, file_url, title, show)
+        VALUES (?, ?, ?, ?, ?, ?)
         `,
-        [file_name[i] || "", text[i], link[i], finalFileUrl, title[i]],
+        [file_name[i] || "", text[i], link[i], finalFileUrl, title[i], show[i]],
       );
     }
 
