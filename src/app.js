@@ -2157,9 +2157,8 @@ app.post("/api/payment/ready", async (req, res) => {
       signature,
       verification,
       mKey,
-      returnUrl:
-        process.env.INICIS_RETURN_URL ||
-        "https://localhost:4000/api/payment/return",
+      returnUrl: "https://dreampingback.duckdns.org:4000/api/payment/return",
+      closeUrl: "https://dreampingback.duckdns.org:4000/",
     });
   } catch (error) {
     console.error("payment ready error:", error);
