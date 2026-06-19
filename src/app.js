@@ -2493,6 +2493,309 @@ app.post("/api/payment/return", async (req, res) => {
   }
 });
 
+app.post("/api/payment/innopay/approve", async (req, res) => {
+  const conn = await pool.getConnection();
+
+  const getAllSchedules = (room) => {
+    let naver = [];
+    let soogie = [];
+
+    try {
+      naver =
+        typeof room.check_in_and_out === "string"
+          ? JSON.parse(room.check_in_and_out)
+          : room.check_in_and_out || [];
+    } catch {
+      naver = [];
+    }
+
+    try {
+      soogie =
+        typeof room.check_in_and_out_soogie === "string"
+          ? JSON.parse(room.check_in_and_out_soogie)
+          : room.check_in_and_out_soogie || [];
+    } catch {
+      soogie = [];
+    }
+
+    return [...naver, ...soogie];
+  };
+
+  const isOverlap = (list, start, end) => {
+    return list.some((s) => start <= s.check_out && s.check_in <= end);
+  };
+
+  try {
+    await conn.beginTransaction();
+
+    const {
+      paymentToken,
+      tid,
+      mid,
+      amt,
+      taxFreeAmt = "0",
+      moid,
+    } = req.body || {};
+
+    console.log("innopay approve body:", req.body);
+
+    if (!paymentToken || !tid || !mid || !amt || !moid) {
+      await conn.rollback();
+      return res.json({
+        ok: false,
+        message: "이노페이 승인 정보 부족",
+      });
+    }
+
+    let response;
+
+    try {
+      response = await axios.post(
+        "https://api.innopay.co.kr/v1/transactions/pay",
+        {
+          tid,
+          mid,
+          moid,
+          amt,
+          taxFreeAmt,
+        },
+        {
+          headers: {
+            "Payment-Token": paymentToken,
+            "Merchant-Key": process.env.INNOPAY_MERCHANT_KEY,
+            "Content-Type": "application/json; charset=utf-8",
+          },
+          timeout: 10000,
+        },
+      );
+    } catch (err) {
+      await conn.rollback();
+
+      console.error(
+        "Innopay approve request error:",
+        err.response?.data || err.message,
+      );
+
+      return res.json({
+        ok: false,
+        message: "이노페이 승인 요청 실패",
+        error: err.response?.data || err.message,
+      });
+    }
+
+    const data = response.data;
+    console.log("이노페이 승인 결과:", data);
+
+    if (!data.success) {
+      await conn.query(
+        `
+        UPDATE reservations_info
+        SET status='CANCELLED', updated_at=NOW()
+        WHERE order_id=?
+        `,
+        [moid],
+      );
+
+      await conn.commit();
+
+      return res.json({
+        ok: false,
+        message: data.message || data.resultMsg || "결제 승인 실패",
+        data,
+      });
+    }
+
+    const approved = data.data || {};
+
+    const approvedTid = approved.tid || tid;
+    const approvedMoid = approved.moid || moid;
+    const approvedAmt = approved.amt ?? amt;
+
+    const [rows] = await conn.query(
+      `
+      SELECT *
+      FROM reservations_info
+      WHERE order_id=?
+      FOR UPDATE
+      `,
+      [approvedMoid],
+    );
+
+    if (!rows.length) {
+      await conn.rollback();
+
+      return res.json({
+        ok: false,
+        message: "예약 없음",
+      });
+    }
+
+    const reservation = rows[0];
+
+    if (Number(reservation.total_amount) !== Number(approvedAmt)) {
+      await conn.query(
+        `
+        UPDATE reservations_info
+        SET status='CANCELLED', updated_at=NOW()
+        WHERE id=?
+        `,
+        [reservation.id],
+      );
+
+      await conn.commit();
+
+      return res.json({
+        ok: false,
+        message: "금액 불일치",
+      });
+    }
+
+    if (reservation.status === "PAID") {
+      await conn.rollback();
+
+      return res.json({
+        ok: true,
+        message: "이미 처리됨",
+        reservationId: reservation.id,
+        tid: reservation.tid || approvedTid,
+      });
+    }
+
+    const [rooms] = await conn.query(
+      `
+      SELECT *
+      FROM room
+      WHERE room_group_id=?
+      ORDER BY id ASC
+      `,
+      [reservation.room_group_id],
+    );
+
+    let assignedRoomId = null;
+
+    for (const room of rooms) {
+      const schedules = getAllSchedules(room);
+
+      if (!isOverlap(schedules, reservation.check_in, reservation.check_out)) {
+        assignedRoomId = room.id;
+        break;
+      }
+    }
+
+    if (!assignedRoomId) {
+      await conn.rollback();
+
+      return res.json({
+        ok: false,
+        message: "배정 가능한 객실 없음",
+      });
+    }
+
+    await conn.query(
+      `
+      UPDATE room
+      SET
+        check_in=?,
+        check_out=?,
+        check_in_and_out=JSON_ARRAY_APPEND(
+          IFNULL(check_in_and_out, JSON_ARRAY()),
+          '$',
+          JSON_OBJECT(
+            'check_in', ?,
+            'check_out', ?,
+            'source', 'payment'
+          )
+        )
+      WHERE id=?
+      `,
+      [
+        reservation.check_in,
+        reservation.check_out,
+        reservation.check_in,
+        reservation.check_out,
+        assignedRoomId,
+      ],
+    );
+
+    await conn.query(
+      `
+      UPDATE reservations_info
+      SET
+        status='PAID',
+        is_innopay=1,
+        room_id=?,
+        tid=?,
+        updated_at=NOW()
+      WHERE id=?
+      `,
+      [assignedRoomId, approvedTid, reservation.id],
+    );
+
+    const [groupRows] = await conn.query(
+      `
+      SELECT name
+      FROM room_group
+      WHERE id=?
+      `,
+      [reservation.room_group_id],
+    );
+
+    const productName = groupRows.length > 0 ? groupRows[0].name : "객실";
+
+    const smsText = `[드림핑] 예약 완료
+${reservation.buyer_name} 님 예약이 완료되었습니다.
+예약번호: ${reservation.id}
+상품: ${productName}
+체크인:${formatDateForSms(reservation.check_in)}
+체크아웃:${formatDateForSms(reservation.check_out)}
+
+감사합니다.`;
+
+    try {
+      await messageService.send({
+        to: reservation.buyer_tel,
+        from: process.env.SOLAPI_FROM_NUMBER,
+        text: smsText,
+      });
+    } catch (smsErr) {
+      console.error("SMS send failed:", smsErr.message);
+    }
+
+    try {
+      await messageService.send({
+        to: "01068669088",
+        from: process.env.SOLAPI_FROM_NUMBER,
+        text: smsText,
+      });
+    } catch (smsErr) {
+      console.error("SMS admin send failed:", smsErr.message);
+    }
+
+    await conn.commit();
+
+    return res.json({
+      ok: true,
+      message: "결제 성공",
+      reservationId: reservation.id,
+      tid: approvedTid,
+      receiptUrl: approved.receiptUrl,
+      data,
+    });
+  } catch (error) {
+    await conn.rollback();
+
+    console.error("innopay approve error:", error);
+
+    return res.json({
+      ok: false,
+      message: error.message || "서버 오류",
+    });
+  } finally {
+    conn.release();
+    syncNaverBookingsToRooms();
+  }
+});
+
 // ======================================================
 // 모바일 이니시스 결제 시작
 // ======================================================
@@ -3322,6 +3625,168 @@ app.post("/api/reservation/refund", async (req, res) => {
       ok: true,
       refundPercent,
       refundAmount,
+    });
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "서버 오류",
+    });
+  } finally {
+    conn.release();
+    syncNaverBookingsToRooms();
+  }
+});
+
+app.post("/api/reservation/refund-innopay", async (req, res) => {
+  const conn = await pool.getConnection();
+
+  try {
+    const { reservationId } = req.body;
+
+    const [rows] = await conn.query(
+      `
+      SELECT *
+      FROM reservations_info
+      WHERE id = ?
+      `,
+      [reservationId],
+    );
+
+    if (!rows.length) {
+      return res.json({
+        ok: false,
+        message: "예약 없음",
+      });
+    }
+
+    const reservation = rows[0];
+
+    if (reservation.status === "CANCELLED") {
+      return res.json({
+        ok: false,
+        message: "이미 환불된 예약",
+      });
+    }
+
+    if (!reservation.is_innopay) {
+      return res.json({
+        ok: false,
+        message: "이노페이 결제건이 아닙니다.",
+      });
+    }
+
+    if (!reservation.tid) {
+      return res.json({
+        ok: false,
+        message: "TID 없음",
+      });
+    }
+
+    // -------------------
+    // 환불 비율 계산
+    // -------------------
+
+    const [refundRows] = await conn.query(
+      `
+      SELECT *
+      FROM refund_info
+      ORDER BY day_before DESC
+      `,
+    );
+
+    const today = new Date();
+    const checkIn = new Date(reservation.check_in);
+
+    today.setHours(0, 0, 0, 0);
+    checkIn.setHours(0, 0, 0, 0);
+
+    const dayBefore = Math.floor((checkIn - today) / (1000 * 60 * 60 * 24));
+
+    let refundPercent = 0;
+
+    for (const row of refundRows) {
+      if (dayBefore >= row.day_before) {
+        refundPercent = row.per;
+        break;
+      }
+    }
+
+    // 실서비스 전 테스트용이면 아래처럼 1000 유지
+    // 실서비스 때는 Number(reservation.total_amount) 로 변경
+    const totalAmount = 1000;
+    // const totalAmount = Number(reservation.total_amount);
+
+    const refundAmount = Math.floor((totalAmount * refundPercent) / 100);
+
+    console.log({
+      dayBefore,
+      refundPercent,
+      refundAmount,
+    });
+
+    if (!refundAmount || refundAmount <= 0) {
+      return res.json({
+        ok: false,
+        message: "환불 금액이 없습니다.",
+      });
+    }
+
+    // -------------------
+    // 이노페이 환불 요청
+    // -------------------
+
+    const cancelBody = {
+      mid: process.env.INNOPAY_MID,
+      tid: reservation.tid,
+      svcCd: "01",
+      partialCancelCode: refundPercent === 100 ? "0" : "1",
+      cancelAmt: String(refundAmount),
+      cancelMsg: refundPercent === 100 ? "고객 환불" : "고객 부분환불",
+      cancelPwd: process.env.INNOPAY_CANCEL_PWD,
+    };
+
+    console.log("innopay cancelBody", cancelBody);
+
+    const result = await fetch("https://api.innopay.co.kr/api/cancelApi", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(cancelBody),
+    });
+
+    const refundResult = await result.json();
+
+    console.log("innopay refundResult", refundResult);
+
+    if (refundResult.success === false) {
+      return res.json({
+        ok: false,
+        message: refundResult.message || refundResult.resultMsg || "환불 실패",
+        data: refundResult,
+      });
+    }
+
+    await conn.query(
+      `
+      UPDATE reservations_info
+      SET
+        status = 'CANCELLED',
+        refund_percent = ?,
+        refund_amount = ?,
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [refundPercent, refundAmount, reservation.id],
+    );
+
+    return res.json({
+      ok: true,
+      refundPercent,
+      refundAmount,
+      data: refundResult,
     });
   } catch (err) {
     console.error(err);
