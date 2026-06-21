@@ -1167,89 +1167,56 @@ app.get("/api/get-main-event-popup", async (req, res) => {
   }
 });
 
-app.post("/api/room-price", verifyToken, async (req, res) => {
+app.post("/api/room-price", async (req, res) => {
   try {
-    const { dates, rooms } = req.body;
-    console.log(rooms);
+    const { prices } = req.body;
 
-    if (!Array.isArray(dates) || !Array.isArray(rooms)) {
-      return res.status(400).json({
-        ok: false,
-        message: "잘못된 요청 형식입니다.",
-      });
-    }
-
-    const insertValues = [];
-
-    for (const date of dates) {
-      for (const room of rooms) {
-        const price = Number(room.price);
-        const dayUsePrice = Number(room.day_use_price || 0);
-        const humanPlusPrice = Number(room.human_plus_price || 0);
-
-        if (!room.room_group_id || !room.room_group_name) continue;
-        if (!price || price <= 0) continue;
-
-        insertValues.push([
-          room.room_group_id,
-          date,
-          price,
-          room.room_group_name,
-          dayUsePrice,
-          humanPlusPrice,
-        ]);
-      }
-    }
-
-    if (insertValues.length === 0) {
+    if (!Array.isArray(prices) || prices.length === 0) {
       return res.status(400).json({
         ok: false,
         message: "저장할 가격 데이터가 없습니다.",
       });
     }
 
-    const conn = await pool.getConnection();
+    const values = prices.map((item) => [
+      item.date,
+      item.room_group_id,
+      item.room_group_name,
+      Number(item.price || 0),
+      Number(item.day_use_price || 0),
+      Number(item.human_plus_price || 0),
+      Number(item.pet_plus_price || 0),
+    ]);
 
-    await conn.beginTransaction();
+    await pool.query(
+      `
+      INSERT INTO room_price
+      (
+        date,
+        room_group_id,
+        room_group_name,
+        price,
+        day_use_price,
+        human_plus_price,
+        pet_plus_price
+      )
+      VALUES ?
+      ON DUPLICATE KEY UPDATE
+        room_group_name = VALUES(room_group_name),
+        price = VALUES(price),
+        day_use_price = VALUES(day_use_price),
+        human_plus_price = VALUES(human_plus_price),
+        pet_plus_price = VALUES(pet_plus_price)
+      `,
+      [values],
+    );
 
-    try {
-      const placeholders = dates.map(() => "?").join(",");
-
-      await conn.query(
-        `DELETE FROM room_price WHERE date IN (${placeholders})`,
-        dates,
-      );
-
-      await conn.query(
-        `
-        INSERT INTO room_price
-        (
-          room_group_id,
-          date,
-          price,
-          room_group_name,
-          day_use_price,
-          human_plus_price
-        )
-        VALUES ?
-        `,
-        [insertValues],
-      );
-
-      await conn.commit();
-
-      return res.json({
-        ok: true,
-        message: "날짜 기준 전체 덮어쓰기 완료",
-      });
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    return res.json({
+      ok: true,
+      message: "객실 가격이 저장되었습니다.",
+    });
   } catch (error) {
-    console.error("room_price replace error:", error);
+    console.error("room_price save error:", error);
 
     return res.status(500).json({
       ok: false,
@@ -1286,6 +1253,7 @@ app.get("/api/room-price", async (req, res) => {
         price,
         day_use_price,
         human_plus_price,
+        pet_plus_price,
         DATE_FORMAT(date, '%Y-%m-%d') AS date
       FROM room_price
       WHERE date >= ? AND date < ?
