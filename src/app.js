@@ -1169,50 +1169,15 @@ app.get("/api/get-main-event-popup", async (req, res) => {
 
 app.post("/api/room-price", async (req, res) => {
   try {
-<<<<<<< HEAD
-    const { dates, rooms } = req.body;
-
-    console.log("dates:", dates);
-    console.log("rooms:", rooms);
-
-    if (!Array.isArray(dates) || dates.length === 0) {
-=======
     const { prices } = req.body;
     console.log(prices);
     if (!Array.isArray(prices) || prices.length === 0) {
->>>>>>> 2241fc74766d7f95d765f1203c2f0176b83e68d5
       return res.status(400).json({
         ok: false,
         message: "저장할 날짜 데이터가 없습니다.",
       });
     }
 
-<<<<<<< HEAD
-    if (!Array.isArray(rooms) || rooms.length === 0) {
-      return res.status(400).json({
-        ok: false,
-        message: "저장할 객실 데이터가 없습니다.",
-      });
-    }
-
-    const values = [];
-
-    dates.forEach((date) => {
-      rooms.forEach((room) => {
-        values.push([
-          date,
-          room.room_group_id,
-          room.room_group_name,
-          Number(room.price || 0),
-          Number(room.day_use_price || 0),
-          Number(room.human_plus_price || 0),
-          Number(room.pet_plus_price || 0),
-        ]);
-      });
-    });
-
-    console.log("insert values:", values);
-=======
     const values = prices.map((item) => [
       item.date,
       item.room_group_id,
@@ -1224,7 +1189,6 @@ app.post("/api/room-price", async (req, res) => {
     ]);
     
     console.log(values);
->>>>>>> 2241fc74766d7f95d765f1203c2f0176b83e68d5
 
     await pool.query(
       `
