@@ -1166,13 +1166,9 @@ app.get("/api/get-main-event-popup", async (req, res) => {
     });
   }
 });
-
 app.post("/api/room-price", async (req, res) => {
   try {
     const { dates, rooms } = req.body;
-
-    console.log("dates:", dates);
-    console.log("rooms:", rooms);
 
     if (!Array.isArray(dates) || dates.length === 0) {
       return res.status(400).json({
@@ -1200,11 +1196,10 @@ app.post("/api/room-price", async (req, res) => {
           Number(room.day_use_price || 0),
           Number(room.human_plus_price || 0),
           Number(room.pet_plus_price || 0),
+          Number(room.is_day_use ?? 1),
         ]);
       });
     });
-
-    console.log("insert values:", values);
 
     await pool.query(
       `
@@ -1216,7 +1211,8 @@ app.post("/api/room-price", async (req, res) => {
         price,
         day_use_price,
         human_plus_price,
-        pet_plus_price
+        pet_plus_price,
+        is_day_use
       )
       VALUES ?
       ON DUPLICATE KEY UPDATE
@@ -1224,7 +1220,8 @@ app.post("/api/room-price", async (req, res) => {
         price = VALUES(price),
         day_use_price = VALUES(day_use_price),
         human_plus_price = VALUES(human_plus_price),
-        pet_plus_price = VALUES(pet_plus_price)
+        pet_plus_price = VALUES(pet_plus_price),
+        is_day_use = VALUES(is_day_use)
       `,
       [values],
     );
@@ -1242,7 +1239,6 @@ app.post("/api/room-price", async (req, res) => {
     });
   }
 });
-
 app.get("/api/room-price", async (req, res) => {
   try {
     let { year, month, roomId } = req.query;
@@ -1272,6 +1268,7 @@ app.get("/api/room-price", async (req, res) => {
         day_use_price,
         human_plus_price,
         pet_plus_price,
+        is_day_use,
         DATE_FORMAT(date, '%Y-%m-%d') AS date
       FROM room_price
       WHERE date >= ? AND date < ?
@@ -1302,6 +1299,57 @@ app.get("/api/room-price", async (req, res) => {
     return res.status(500).json({
       ok: false,
       message: "객실 가격 조회 중 오류 발생",
+    });
+  }
+});
+
+app.patch("/api/room-price/day-use", async (req, res) => {
+  try {
+    const { dates, room_group_ids, is_day_use } = req.body;
+
+    if (!Array.isArray(dates) || dates.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "변경할 날짜가 없습니다.",
+      });
+    }
+
+    if (!Array.isArray(room_group_ids) || room_group_ids.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "변경할 객실이 없습니다.",
+      });
+    }
+
+    const parsedIsDayUse = Number(is_day_use);
+
+    if (![0, 1, 2].includes(parsedIsDayUse)) {
+      return res.status(400).json({
+        ok: false,
+        message: "is_day_use 값이 올바르지 않습니다.",
+      });
+    }
+
+    await pool.query(
+      `
+      UPDATE room_price
+      SET is_day_use = ?
+      WHERE date IN (?)
+      AND room_group_id IN (?)
+      `,
+      [parsedIsDayUse, dates, room_group_ids],
+    );
+
+    return res.json({
+      ok: true,
+      message: "가능 유형이 변경되었습니다.",
+    });
+  } catch (error) {
+    console.error("room_price day_use update error:", error);
+
+    return res.status(500).json({
+      ok: false,
+      message: "가능 유형 변경 중 오류 발생",
     });
   }
 });
