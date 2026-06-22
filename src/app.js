@@ -1170,7 +1170,7 @@ app.get("/api/get-main-event-popup", async (req, res) => {
 app.post("/api/room-price", async (req, res) => {
   try {
     const { prices } = req.body;
-
+    console.log(prices);
     if (!Array.isArray(prices) || prices.length === 0) {
       return res.status(400).json({
         ok: false,
@@ -1187,6 +1187,8 @@ app.post("/api/room-price", async (req, res) => {
       Number(item.human_plus_price || 0),
       Number(item.pet_plus_price || 0),
     ]);
+    
+    console.log(values);
 
     await pool.query(
       `
