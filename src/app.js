@@ -698,7 +698,7 @@ app.post(
       }
 
       // 🔥 기존 데이터 전체 삭제
-      await pool.query("DELETE FROM special_offer");
+      await pool.query("DELETE FROM ledger_ticket_bn");
 
       // 새 파일과 슬라이드를 index로 매칭
       const fileMap = {}; // index: fileUrl
