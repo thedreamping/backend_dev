@@ -663,6 +663,95 @@ app.post(
 );
 
 app.post(
+  "/api/ledger-ticket",
+  verifyToken,
+  upload.array("file"),
+  async (req, res) => {
+    try {
+      const files = req.files || [];
+
+      // multer + formData 특성상
+      const normalizeToArray = (value) => {
+        if (!value) return [];
+        return Array.isArray(value) ? value : [value];
+      };
+
+      const file_name = normalizeToArray(req.body.file_name);
+      const text = normalizeToArray(req.body.text);
+      const link = normalizeToArray(req.body.link);
+      const file_url = normalizeToArray(req.body.file_url);
+      const price = normalizeToArray(req.body.price);
+      const period = normalizeToArray(req.body.period);
+      const file_index = normalizeToArray(req.body.file_index); // 새 파일의 슬라이드 index
+
+      // 필수값 체크
+      if (!text.length || text.length !== link.length) {
+        return res.status(400).json({ message: "데이터 형식 오류" });
+      }
+
+      if (!price.length || price.length !== link.length) {
+        return res.status(400).json({ message: "데이터 형식 오류" });
+      }
+
+      if (!period.length || period.length !== link.length) {
+        return res.status(400).json({ message: "데이터 형식 오류" });
+      }
+
+      // 🔥 기존 데이터 전체 삭제
+      await pool.query("DELETE FROM special_offer");
+
+      // 새 파일과 슬라이드를 index로 매칭
+      const fileMap = {}; // index: fileUrl
+      files.forEach((file, idx) => {
+        const index = parseInt(file_index[idx], 10);
+        if (!isNaN(index)) {
+          fileMap[index] = `/uploads/${file.filename}`;
+        }
+      });
+
+      for (let i = 0; i < text.length; i++) {
+        let finalFileUrl;
+
+        // 새 파일이 있으면 해당 index에서 가져오기
+        if (fileMap[i]) {
+          finalFileUrl = fileMap[i];
+        }
+        // 새 파일 없으면 기존 파일 유지
+        else if (file_url[i]) {
+          finalFileUrl = file_url[i];
+        }
+        // 둘 다 없으면 에러
+        else {
+          return res.status(400).json({
+            message: `이미지 파일이 누락되었습니다. index: ${i}`,
+          });
+        }
+
+        await pool.query(
+          `
+        INSERT INTO ledger_ticket_bn (file_name, text, link, file_url, period, price)
+        VALUES (?, ?, ?, ?, ?, ?)
+        `,
+          [
+            file_name[i] || "",
+            text[i],
+            link[i],
+            finalFileUrl,
+            period[i],
+            price[i],
+          ],
+        );
+      }
+
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error("special-offer save error:", err);
+      return res.status(500).json({ message: "서버 오류" });
+    }
+  },
+);
+
+app.post(
   "/api/around-and-spot",
   verifyToken,
   upload.array("file"),
@@ -1061,6 +1150,25 @@ app.get("/api/get-special-offer", async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT * FROM special_offer ORDER BY id ASC`,
+    );
+
+    return res.json({
+      ok: true,
+      data: rows,
+    });
+  } catch (err) {
+    console.error("main-banner fetch error:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "메인 배너 조회 중 오류 발생",
+    });
+  }
+});
+
+app.get("/api/get-ledger-ticket", async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT * FROM ledger_ticket_bn ORDER BY id ASC`,
     );
 
     return res.json({
