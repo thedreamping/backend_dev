@@ -3943,6 +3943,40 @@ app.post("/api/reservation/refund-innopay", async (req, res) => {
   }
 });
 
+app.get("/api/reservation_info_by_moid/:moid", async (req, res) => {
+  try {
+    const { moid } = req.params;
+
+    const [rows] = await pool.query(
+      `
+      SELECT *
+      FROM reservations_info
+      WHERE order_id = ?
+      `,
+      [moid],
+    );
+
+    if (!rows.length) {
+      return res.json({
+        ok: false,
+        message: "예약정보 없음",
+      });
+    }
+
+    res.json({
+      ok: true,
+      data: rows[0],
+    });
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      ok: false,
+      message: "서버 오류",
+    });
+  }
+});
+
 app.get("/api/reservation_info/:id", async (req, res) => {
   try {
     const { id } = req.params;
