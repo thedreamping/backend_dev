@@ -3857,8 +3857,8 @@ app.post("/api/reservation/refund-innopay", async (req, res) => {
 
     // 실서비스 전 테스트용이면 아래처럼 1000 유지
     // 실서비스 때는 Number(reservation.total_amount) 로 변경
-    const totalAmount = 1000;
-    // const totalAmount = Number(reservation.total_amount);
+    //const totalAmount = 1000;
+    const totalAmount = Number(reservation.total_amount);
 
     const refundAmount = Math.floor((totalAmount * refundPercent) / 100);
 
