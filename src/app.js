@@ -1274,9 +1274,12 @@ app.get("/api/get-main-event-popup", async (req, res) => {
     });
   }
 });
+
 app.post("/api/room-price", async (req, res) => {
+  const conn = await pool.getConnection();
+  console.log("room-price body:", req.body);
   try {
-    const { dates, rooms } = req.body;
+    const { dates, rooms, checkedIds } = req.body;
 
     if (!Array.isArray(dates) || dates.length === 0) {
       return res.status(400).json({
@@ -1285,68 +1288,108 @@ app.post("/api/room-price", async (req, res) => {
       });
     }
 
-    if (!Array.isArray(rooms) || rooms.length === 0) {
+    if (!Array.isArray(rooms)) {
       return res.status(400).json({
         ok: false,
         message: "저장할 객실 데이터가 없습니다.",
       });
     }
 
-    const values = [];
-
-    dates.forEach((date) => {
-      rooms.forEach((room) => {
-        values.push([
-          date,
-          room.room_group_id,
-          room.room_group_name,
-          Number(room.price || 0),
-          Number(room.day_use_price || 0),
-          Number(room.human_plus_price || 0),
-          Number(room.pet_plus_price || 0),
-          Number(room.is_day_use ?? 1),
-        ]);
+    if (!Array.isArray(checkedIds)) {
+      return res.status(400).json({
+        ok: false,
+        message: "체크된 객실 데이터가 없습니다.",
       });
-    });
+    }
 
-    await pool.query(
-      `
-      INSERT INTO room_price
-      (
-        date,
-        room_group_id,
-        room_group_name,
-        price,
-        day_use_price,
-        human_plus_price,
-        pet_plus_price,
-        is_day_use
-      )
-      VALUES ?
-      ON DUPLICATE KEY UPDATE
-        room_group_name = VALUES(room_group_name),
-        price = VALUES(price),
-        day_use_price = VALUES(day_use_price),
-        human_plus_price = VALUES(human_plus_price),
-        pet_plus_price = VALUES(pet_plus_price),
-        is_day_use = VALUES(is_day_use)
-      `,
-      [values],
-    );
+    await conn.beginTransaction();
+
+    // 체크가 하나도 없으면 해당 날짜 전체 삭제
+    if (checkedIds.length === 0) {
+      await conn.query(
+        `
+        DELETE FROM room_price
+        WHERE date IN (?)
+        `,
+        [dates],
+      );
+    } else {
+      // 체크 해제된 객실만 삭제
+      await conn.query(
+        `
+        DELETE FROM room_price
+        WHERE date IN (?)
+        AND room_group_id NOT IN (?)
+        `,
+        [dates, checkedIds],
+      );
+    }
+
+    // 체크된 객실 가격 저장 / 수정
+    if (rooms.length > 0) {
+      const values = [];
+
+      dates.forEach((date) => {
+        rooms.forEach((room) => {
+          values.push([
+            date,
+            room.room_group_id,
+            room.room_group_name,
+            Number(room.price || 0),
+            Number(room.day_use_price || 0),
+            Number(room.human_plus_price || 0),
+            Number(room.pet_plus_price || 0),
+            Number(room.is_day_use ?? 1),
+          ]);
+        });
+      });
+
+      await conn.query(
+        `
+        INSERT INTO room_price
+        (
+          date,
+          room_group_id,
+          room_group_name,
+          price,
+          day_use_price,
+          human_plus_price,
+          pet_plus_price,
+          is_day_use
+        )
+        VALUES ?
+        ON DUPLICATE KEY UPDATE
+          room_group_name = VALUES(room_group_name),
+          price = VALUES(price),
+          day_use_price = VALUES(day_use_price),
+          human_plus_price = VALUES(human_plus_price),
+          pet_plus_price = VALUES(pet_plus_price),
+          is_day_use = VALUES(is_day_use)
+        `,
+        [values],
+      );
+    }
+
+    await conn.commit();
 
     return res.json({
       ok: true,
       message: "객실 가격이 저장되었습니다.",
     });
   } catch (error) {
+    await conn.rollback();
+
     console.error("room_price save error:", error);
 
     return res.status(500).json({
       ok: false,
       message: "객실 가격 저장 중 오류 발생",
     });
+  } finally {
+    conn.release();
   }
 });
+
 app.get("/api/room-price", async (req, res) => {
   try {
     let { year, month, roomId } = req.query;
@@ -1393,7 +1436,7 @@ app.get("/api/room-price", async (req, res) => {
       }
     }
 
-    query += ` ORDER BY date ASC`;
+    query += ` ORDER BY date ASC, room_group_id ASC`;
 
     const [rows] = await pool.query(query, params);
 
