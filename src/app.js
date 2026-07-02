@@ -4903,10 +4903,21 @@ app.get("/api/reservation_history", async (req, res) => {
     // 네이버 / 홈페이지만. 수기는 payment_date 없으므로 제외.
     if (payment_from && payment_to) {
       where.push(`
-        source != 'manual'
-        AND DATE(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))) >= ?
-        AND DATE(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))) <= ?
-      `);
+    source != 'manual'
+    AND DATE(
+      CASE
+        WHEN source = 'website' OR booking_id LIKE 'SITE_%' THEN created_at
+        ELSE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))
+      END
+    ) >= ?
+    AND DATE(
+      CASE
+        WHEN source = 'website' OR booking_id LIKE 'SITE_%' THEN created_at
+        ELSE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))
+      END
+    ) <= ?
+  `);
+
       params.push(payment_from, payment_to);
     }
 
