@@ -1865,9 +1865,25 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     };
 
     if (cancel_booking) {
+      const cancelCheckIn = normalizeDate(cancel_booking.check_in);
+      const cancelCheckOut = normalizeDate(cancel_booking.check_out);
+
       finalSoogieSchedule = finalSoogieSchedule.filter((booking) => {
         return !isSameBooking(booking, cancel_booking);
       });
+
+      await conn.query(
+        `
+    UPDATE room_booking_history
+    SET canceled = 1
+    WHERE room_id = ?
+      AND source = 'manual'
+      AND check_in = ?
+      AND check_out = ?
+      AND canceled = 0
+    `,
+        [id, cancelCheckIn, cancelCheckOut],
+      );
     }
 
     if (manual_booking) {
@@ -2087,6 +2103,7 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
     connection.release();
   }
 });
+
 app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
   const conn = await pool.getConnection();
 
@@ -2150,7 +2167,17 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
       memo: manual_booking.memo || "",
     };
 
-    schedules.push(newBooking);
+    const duplicated = schedules.some((booking) => {
+      return (
+        String(booking.source || "manual") === "manual" &&
+        String(booking.check_in).slice(0, 10) === newBooking.check_in &&
+        String(booking.check_out).slice(0, 10) === newBooking.check_out
+      );
+    });
+
+    if (!duplicated) {
+      schedules.push(newBooking);
+    }
 
     schedules.sort((a, b) => {
       return String(a.check_in).localeCompare(String(b.check_in));
@@ -2168,6 +2195,62 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
       WHERE id = ?
       `,
       [JSON.stringify(schedules), id],
+    );
+
+    const manualBookingId = `MANUAL_${id}_${newBooking.check_in}_${newBooking.check_out}_${Date.now()}`;
+
+    const payload = {
+      booking_id: manualBookingId,
+      product_name: "수기예약",
+      name: "",
+      phone: "",
+      price: 0,
+      qty: 1,
+      booking_option: null,
+      request_memo: newBooking.memo || "",
+      check_in: newBooking.check_in,
+      check_out: newBooking.check_out,
+    };
+
+    await conn.query(
+      `
+  INSERT INTO room_booking_history (
+    payload,
+    booking_id,
+    check_in,
+    check_out,
+    room_id,
+    room_group_id,
+    source,
+    guest_name,
+    guest_phone,
+    qty,
+    price,
+    product_name,
+    memo,
+    canceled
+  )
+  SELECT
+    ?, ?, ?, ?, r.id, r.room_group_id,
+    'manual',
+    '',
+    '',
+    1,
+    0,
+    '수기예약',
+    ?,
+    0
+  FROM room r
+  WHERE r.id = ?
+  `,
+      [
+        JSON.stringify(payload),
+        manualBookingId,
+        newBooking.check_in,
+        newBooking.check_out,
+        newBooking.memo || "",
+        id,
+      ],
     );
 
     await conn.commit();
@@ -4251,10 +4334,6 @@ app.post("/api/reservation/refund-innopay", async (req, res) => {
       });
     }
 
-    // -------------------
-    // 환불 비율 계산
-    // -------------------
-
     const [refundRows] = await conn.query(
       `
       SELECT *
@@ -4280,18 +4359,8 @@ app.post("/api/reservation/refund-innopay", async (req, res) => {
       }
     }
 
-    // 실서비스 전 테스트용이면 아래처럼 1000 유지
-    // 실서비스 때는 Number(reservation.total_amount) 로 변경
-    //const totalAmount = 1000;
     const totalAmount = Number(reservation.total_amount);
-
     const refundAmount = Math.floor((totalAmount * refundPercent) / 100);
-
-    console.log({
-      dayBefore,
-      refundPercent,
-      refundAmount,
-    });
 
     if (!refundAmount || refundAmount <= 0) {
       return res.json({
@@ -4299,10 +4368,6 @@ app.post("/api/reservation/refund-innopay", async (req, res) => {
         message: "환불 금액이 없습니다.",
       });
     }
-
-    // -------------------
-    // 이노페이 환불 요청
-    // -------------------
 
     const cancelBody = {
       mid: process.env.INNOPAY_MID,
@@ -4336,6 +4401,8 @@ app.post("/api/reservation/refund-innopay", async (req, res) => {
       });
     }
 
+    await conn.beginTransaction();
+
     await conn.query(
       `
       UPDATE reservations_info
@@ -4349,6 +4416,65 @@ app.post("/api/reservation/refund-innopay", async (req, res) => {
       [refundPercent, refundAmount, reservation.id],
     );
 
+    await conn.query(
+      `
+      UPDATE room_booking_history
+      SET canceled = 1
+      WHERE booking_id = ?
+         OR booking_id = ?
+         OR JSON_UNQUOTE(JSON_EXTRACT(payload, '$.reservation_id')) = ?
+      `,
+      [
+        `SITE_${reservation.id}`,
+        String(reservation.id),
+        String(reservation.id),
+      ],
+    );
+
+    const [groupRows] = await conn.query(
+      `
+      SELECT name
+      FROM room_group
+      WHERE id = ?
+      `,
+      [reservation.room_group_id],
+    );
+
+    const productName = groupRows.length > 0 ? groupRows[0].name : "객실";
+
+    await conn.commit();
+
+    const refundSmsText = `[드림핑] 예약 환불 안내
+${reservation.buyer_name} 님 예약 환불이 처리되었습니다.
+예약번호: ${reservation.id}
+상품: ${productName}
+체크인:${formatDateForSms(reservation.check_in)}
+체크아웃:${formatDateForSms(reservation.check_out)}
+환불비율: ${refundPercent}%
+환불금액: ${Number(refundAmount).toLocaleString()}원
+
+감사합니다.`;
+
+    try {
+      await messageService.send({
+        to: reservation.buyer_tel,
+        from: process.env.SOLAPI_FROM_NUMBER,
+        text: refundSmsText,
+      });
+    } catch (smsErr) {
+      console.error("Refund SMS send failed:", smsErr.message);
+    }
+
+    try {
+      await messageService.send({
+        to: "01068669088",
+        from: process.env.SOLAPI_FROM_NUMBER,
+        text: refundSmsText,
+      });
+    } catch (smsErr) {
+      console.error("Refund SMS admin send failed:", smsErr.message);
+    }
+
     return res.json({
       ok: true,
       refundPercent,
@@ -4356,6 +4482,10 @@ app.post("/api/reservation/refund-innopay", async (req, res) => {
       data: refundResult,
     });
   } catch (err) {
+    try {
+      await conn.rollback();
+    } catch {}
+
     console.error(err);
 
     return res.status(500).json({
@@ -4714,7 +4844,6 @@ app.get("/api/naver-status", async (req, res) => {
     });
   }
 });
-
 app.get("/api/reservation_history", async (req, res) => {
   try {
     let {
@@ -4725,11 +4854,13 @@ app.get("/api/reservation_history", async (req, res) => {
       guest_phone = "",
       memo = "",
 
+      // 예약기간
       check_in_from = "",
-      check_in_to = "",
-
-      check_out_from = "",
       check_out_to = "",
+
+      // 결제일
+      payment_from = "",
+      payment_to = "",
     } = req.query;
 
     page = Number(page) || 1;
@@ -4740,10 +4871,6 @@ app.get("/api/reservation_history", async (req, res) => {
     }
 
     const offset = (page - 1) * limit;
-
-    // =====================================================
-    // WHERE 조건
-    // =====================================================
 
     const where = [];
     const params = [];
@@ -4763,39 +4890,27 @@ app.get("/api/reservation_history", async (req, res) => {
       params.push(`%${memo}%`);
     }
 
-    // =====================================================
-    // 체크인 기간 검색 (KST 기준)
-    // =====================================================
-
-    if (check_in_from) {
-      where.push(`DATE(CONVERT_TZ(check_in,'+00:00','+09:00')) >= ?`);
-      params.push(check_in_from);
+    // 예약기간 검색
+    if (check_in_from && check_out_to) {
+      where.push(`
+        DATE(check_in) >= ?
+        AND DATE(check_out) <= ?
+      `);
+      params.push(check_in_from, check_out_to);
     }
 
-    if (check_in_to) {
-      where.push(`DATE(CONVERT_TZ(check_in,'+00:00','+09:00')) <= ?`);
-      params.push(check_in_to);
-    }
-
-    // =====================================================
-    // 체크아웃 기간 검색 (KST 기준)
-    // =====================================================
-
-    if (check_out_from) {
-      where.push(`DATE(CONVERT_TZ(check_out,'+00:00','+09:00')) >= ?`);
-      params.push(check_out_from);
-    }
-
-    if (check_out_to) {
-      where.push(`DATE(CONVERT_TZ(check_out,'+00:00','+09:00')) <= ?`);
-      params.push(check_out_to);
+    // 결제일 검색
+    // 네이버 / 홈페이지만. 수기는 payment_date 없으므로 제외.
+    if (payment_from && payment_to) {
+      where.push(`
+        source != 'manual'
+        AND DATE(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))) >= ?
+        AND DATE(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))) <= ?
+      `);
+      params.push(payment_from, payment_to);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-
-    // =====================================================
-    // total count
-    // =====================================================
 
     const [countRows] = await pool.query(
       `
@@ -4808,38 +4923,24 @@ app.get("/api/reservation_history", async (req, res) => {
 
     const total = countRows[0]?.total || 0;
 
-    // =====================================================
-    // 목록 조회
-    // =====================================================
-
     const [rows] = await pool.query(
       `
       SELECT
         id,
         booking_id,
-
         check_in,
         check_out,
-
         room_id,
         room_group_id,
-
         source,
-
         guest_name,
         guest_phone,
-
         qty,
         price,
-
         product_name,
-
         memo,
-
         canceled,
-
         payload,
-
         created_at
       FROM room_booking_history
       ${whereSql}
@@ -4850,19 +4951,12 @@ app.get("/api/reservation_history", async (req, res) => {
       [...params, limit, offset],
     );
 
-    // =====================================================
-    // 응답
-    // =====================================================
-
     res.json({
       ok: true,
-
       page,
       limit,
-
       total,
       totalPage: Math.ceil(total / limit),
-
       list: rows,
     });
   } catch (err) {
