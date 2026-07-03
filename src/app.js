@@ -3392,7 +3392,19 @@ app.post("/api/payment/innopay/approve", async (req, res) => {
 
     const productName = groupRows.length > 0 ? groupRows[0].name : "객실";
 
-    const smsText = `[드림핑] 예약 완료
+    const [smsRows] = await conn.query(
+      `
+  SELECT sms_text
+  FROM sms_texts
+  WHERE sms_type = ?
+  LIMIT 1
+  `,
+      ["reservation_confirm"],
+    );
+
+    let smsText = smsRows.length
+      ? smsRows[0].sms_text
+      : `[드림핑] 예약 완료
 ${reservation.buyer_name} 님 예약이 완료되었습니다.
 예약번호: ${reservation.id}
 상품: ${productName}
@@ -3400,6 +3412,13 @@ ${reservation.buyer_name} 님 예약이 완료되었습니다.
 체크아웃:${formatDateForSms(reservation.check_out)}
 
 감사합니다.`;
+
+    smsText = smsText
+      .replaceAll("${name}", reservation.buyer_name || "")
+      .replaceAll("${reservation_id}", String(reservation.id || ""))
+      .replaceAll("${product_name}", productName || "")
+      .replaceAll("${check_in}", formatDateForSms(reservation.check_in))
+      .replaceAll("${check_out}", formatDateForSms(reservation.check_out));
 
     try {
       await messageService.send({
@@ -4444,7 +4463,19 @@ app.post("/api/reservation/refund-innopay", async (req, res) => {
 
     await conn.commit();
 
-    const refundSmsText = `[드림핑] 예약 환불 안내
+    const [smsRows] = await conn.query(
+      `
+  SELECT sms_text
+  FROM sms_texts
+  WHERE sms_type = ?
+  LIMIT 1
+  `,
+      ["refund_confirm"],
+    );
+
+    let refundSmsText = smsRows.length
+      ? smsRows[0].sms_text
+      : `[드림핑] 예약 환불 안내
 ${reservation.buyer_name} 님 예약 환불이 처리되었습니다.
 예약번호: ${reservation.id}
 상품: ${productName}
@@ -4454,6 +4485,15 @@ ${reservation.buyer_name} 님 예약 환불이 처리되었습니다.
 환불금액: ${Number(refundAmount).toLocaleString()}원
 
 감사합니다.`;
+
+    refundSmsText = refundSmsText
+      .replaceAll("${name}", reservation.buyer_name || "")
+      .replaceAll("${reservation_id}", String(reservation.id || ""))
+      .replaceAll("${product_name}", productName || "")
+      .replaceAll("${check_in}", formatDateForSms(reservation.check_in))
+      .replaceAll("${check_out}", formatDateForSms(reservation.check_out))
+      .replaceAll("${refund_percent}", String(refundPercent || 0))
+      .replaceAll("${price}", Number(refundAmount).toLocaleString());
 
     try {
       await messageService.send({
@@ -5077,6 +5117,77 @@ app.get("/api/reservation_infos", async (req, res) => {
     });
   } finally {
     if (conn) conn.release();
+  }
+});
+
+app.get("/api/sms-texts", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT
+        id,
+        sms_type,
+        sms_text,
+        created_at
+      FROM sms_texts
+      ORDER BY id ASC
+    `);
+
+    return res.json({
+      ok: true,
+      data: rows,
+    });
+  } catch (err) {
+    console.error("GET /api/sms-texts error:", err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "SMS 문구 목록 조회 중 오류가 발생했습니다.",
+    });
+  }
+});
+
+app.post("/api/sms-texts", async (req, res) => {
+  const conn = await pool.getConnection();
+
+  try {
+    const { reservation_confirm, refund_confirm } = req.body;
+
+    await conn.beginTransaction();
+
+    await conn.query(
+      `
+      UPDATE sms_texts
+      SET sms_text = ?
+      WHERE sms_type = 'reservation_confirm'
+      `,
+      [reservation_confirm],
+    );
+
+    await conn.query(
+      `
+      UPDATE sms_texts
+      SET sms_text = ?
+      WHERE sms_type = 'refund_confirm'
+      `,
+      [refund_confirm],
+    );
+
+    await conn.commit();
+
+    return res.json({
+      ok: true,
+      message: "SMS 문구가 저장되었습니다.",
+    });
+  } catch (err) {
+    await conn.rollback();
+    console.error("POST /api/sms-texts error:", err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "SMS 문구 저장 중 오류가 발생했습니다.",
+    });
+  } finally {
+    conn.release();
   }
 });
 
