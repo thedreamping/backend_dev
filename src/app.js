@@ -1389,26 +1389,9 @@ app.post("/api/room-price", async (req, res) => {
     conn.release();
   }
 });
-
 app.get("/api/room-price", async (req, res) => {
   try {
     let { year, month, roomId } = req.query;
-
-    if (!year || !month) {
-      return res.status(400).json({
-        ok: false,
-        message: "year, month는 필수입니다.",
-      });
-    }
-
-    month = String(month).padStart(2, "0");
-
-    const startDate = `${year}-${month}-01`;
-
-    const nextMonthDate = new Date(Number(year), Number(month), 1);
-    const nextYear = nextMonthDate.getFullYear();
-    const nextMonthStr = String(nextMonthDate.getMonth() + 1).padStart(2, "0");
-    const endDate = `${nextYear}-${nextMonthStr}-01`;
 
     let query = `
       SELECT
@@ -1422,11 +1405,34 @@ app.get("/api/room-price", async (req, res) => {
         is_day_use,
         DATE_FORMAT(date, '%Y-%m-%d') AS date
       FROM room_price
-      WHERE date >= ? AND date < ?
+      WHERE 1=1
     `;
 
-    const params = [startDate, endDate];
+    const params = [];
 
+    // year, month가 넘어온 경우에만 월 조건 추가
+    if (year && month) {
+      month = String(month).padStart(2, "0");
+
+      const startDate = `${year}-${month}-01`;
+
+      const nextMonthDate = new Date(Number(year), Number(month), 1);
+      const nextYear = nextMonthDate.getFullYear();
+      const nextMonthStr = String(nextMonthDate.getMonth() + 1).padStart(
+        2,
+        "0",
+      );
+      const endDate = `${nextYear}-${nextMonthStr}-01`;
+
+      query += `
+        AND date >= ?
+        AND date < ?
+      `;
+
+      params.push(startDate, endDate);
+    }
+
+    // room_group_id 조건
     if (roomId !== undefined && roomId !== null && roomId !== "") {
       const parsedRoomId = Number(roomId);
 
