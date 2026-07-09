@@ -5502,14 +5502,23 @@ export const syncNaverBookingsToRooms = async () => {
 
         // const first = schedule[0];
 
+        // const schedule = roomSchedules.get(room.id);
+        // const otaSchedule = schedule.filter((s) => !s.is_manual_block);
+
+        // if (!otaSchedule.length) continue;
+
+        // otaSchedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
+
+        // const first = otaSchedule[0];
         const schedule = roomSchedules.get(room.id);
         const otaSchedule = schedule.filter((s) => !s.is_manual_block);
 
-        if (!otaSchedule.length) continue;
+        if (!schedule.length) continue;
 
+        schedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
         otaSchedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
 
-        const first = otaSchedule[0];
+        const first = schedule[0];
 
         await conn.query(
           `
@@ -5553,7 +5562,7 @@ export const syncNaverBookingsToRooms = async () => {
                 check_out: s.check_out,
               })),
             ),
-            ,
+
             room.id,
           ],
         );
