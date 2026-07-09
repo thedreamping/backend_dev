@@ -5609,6 +5609,26 @@ export const syncNaverBookingsToRooms = async () => {
         }
       }
     }
+    // =====================================================
+    // 6. 네이버 취소건 History 반영
+    // =====================================================
+    const [canceledBookings] = await conn.query(`
+  SELECT booking_id
+  FROM naver_bookings
+  WHERE cancel_date2 IS NOT NULL
+`);
+
+    for (const booking of canceledBookings) {
+      await conn.query(
+        `
+    UPDATE room_booking_history
+    SET canceled = 1
+    WHERE booking_id = ?
+      AND source = 'naver'
+    `,
+        [String(booking.booking_id)],
+      );
+    }
 
     await conn.commit();
     console.log("🟢 [SYNC 완료]");
