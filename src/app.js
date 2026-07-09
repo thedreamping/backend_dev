@@ -5667,20 +5667,19 @@ export const syncNaverBookingsToRooms = async () => {
 
           const [exists] = await conn.query(
             `
-  SELECT id, booking_id
-  FROM room_booking_history
-  WHERE source = ?
-    AND room_id = ?
-    AND room_group_id = ?
-    AND check_in = ?
-    AND check_out = ?
-    AND guest_name = ?
-    AND guest_phone = ?
-    AND qty = ?
-    AND price = ?
-    AND product_name <=> ?
-    AND canceled = 0
-  LIMIT 1
+  SELECT id, booking_id, canceled
+FROM room_booking_history
+WHERE source = ?
+  AND room_id = ?
+  AND room_group_id = ?
+  AND check_in = ?
+  AND check_out = ?
+  AND guest_name = ?
+  AND guest_phone = ?
+  AND qty = ?
+  AND price = ?
+  AND product_name <=> ?
+LIMIT 1
   `,
             [
               s.source,
@@ -5700,12 +5699,11 @@ export const syncNaverBookingsToRooms = async () => {
             await conn.query(
               `
     UPDATE room_booking_history
-    SET
-      payload = ?,
-      room_id = ?,
-      room_group_id = ?,
-      canceled = 0
-    WHERE id = ?
+SET
+  payload = ?,
+  room_id = ?,
+  room_group_id = ?
+WHERE id = ?
     `,
               [JSON.stringify(payload), room.id, groupId, exists[0].id],
             );
@@ -5759,6 +5757,7 @@ export const syncNaverBookingsToRooms = async () => {
     product_name,
     qty,
     price,
+  payment_date,
     check_in,
     check_out
   FROM naver_bookings
@@ -5783,20 +5782,38 @@ export const syncNaverBookingsToRooms = async () => {
       // 2) natural fallback 후보 조회
       const [candidates] = await conn.query(
         `
-  SELECT id, booking_id
-  FROM room_booking_history
-  WHERE source = 'naver'
-    AND canceled = 0
-    AND check_in = ?
-    AND check_out = ?
-    AND guest_name = ?
-    AND guest_phone = ?
+SELECT id, booking_id
+FROM room_booking_history
+WHERE source = 'naver'
+  AND canceled = 0
+  AND check_in = ?
+  AND check_out = ?
+  AND guest_name = ?
+  AND guest_phone = ?
+  AND qty = ?
+  AND product_name <=> ?
+  AND ABS(
+    TIMESTAMPDIFF(
+      SECOND,
+      STR_TO_DATE(
+        LEFT(REPLACE(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date')), 'T', ' '), 19),
+        '%Y-%m-%d %H:%i:%s'
+      ),
+      STR_TO_DATE(
+        LEFT(REPLACE(?, 'T', ' '), 19),
+        '%Y-%m-%d %H:%i:%s'
+      )
+    )
+  ) <= 2
   `,
         [
           toKSTDate(booking.check_in),
           toKSTDate(booking.check_out),
           booking.name,
           booking.phone,
+          booking.qty,
+          booking.product_name || null,
+          booking.payment_date,
         ],
       );
 
