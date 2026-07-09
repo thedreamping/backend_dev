@@ -4890,6 +4890,7 @@ app.get("/api/naver-status", async (req, res) => {
     });
   }
 });
+
 app.get("/api/reservation_history", async (req, res) => {
   try {
     let {
@@ -4947,22 +4948,29 @@ app.get("/api/reservation_history", async (req, res) => {
 
     // 결제일 검색
     // 네이버 / 홈페이지만. 수기는 payment_date 없으므로 제외.
+    // DB에 UTC로 들어간 payment_date를 KST 기준 날짜로 보정해서 검색.
     if (payment_from && payment_to) {
       where.push(`
-    source != 'manual'
-    AND DATE(
-      CASE
-        WHEN source = 'website' OR booking_id LIKE 'SITE_%' THEN created_at
-        ELSE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))
-      END
-    ) >= ?
-    AND DATE(
-      CASE
-        WHEN source = 'website' OR booking_id LIKE 'SITE_%' THEN created_at
-        ELSE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))
-      END
-    ) <= ?
-  `);
+        source != 'manual'
+        AND DATE(
+          DATE_ADD(
+            CASE
+              WHEN source = 'website' OR booking_id LIKE 'SITE_%' THEN created_at
+              ELSE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))
+            END,
+            INTERVAL 9 HOUR
+          )
+        ) >= ?
+        AND DATE(
+          DATE_ADD(
+            CASE
+              WHEN source = 'website' OR booking_id LIKE 'SITE_%' THEN created_at
+              ELSE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))
+            END,
+            INTERVAL 9 HOUR
+          )
+        ) <= ?
+      `);
 
       params.push(payment_from, payment_to);
     }
