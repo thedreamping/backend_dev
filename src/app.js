@@ -5448,9 +5448,24 @@ export const syncNaverBookingsToRooms = async () => {
           for (const room of rooms) {
             const schedule = roomSchedules.get(room.id);
 
-            const strictOverlap = schedule.some(
-              (s) => start <= s.check_out && s.check_in <= end,
-            );
+            const strictOverlap = schedule.some((s) => {
+              const existingIsDayUse = s.check_in === s.check_out;
+              const currentIsDayUse = start === end;
+
+              if (existingIsDayUse && !currentIsDayUse) {
+                return s.check_in >= start && s.check_in < end;
+              }
+
+              if (!existingIsDayUse && currentIsDayUse) {
+                return start >= s.check_in && start < s.check_out;
+              }
+
+              if (existingIsDayUse && currentIsDayUse) {
+                return s.check_in === start;
+              }
+
+              return start <= s.check_out && s.check_in <= end;
+            });
 
             if (!strictOverlap) {
               schedule.push(period);
@@ -5465,18 +5480,26 @@ export const syncNaverBookingsToRooms = async () => {
               const schedule = roomSchedules.get(room.id);
 
               const relaxedOverlap = schedule.some((s) => {
-                // 데이유즈끼리는 같은 날짜 중복 금지
-                if (
-                  isDayUse &&
-                  s.check_in === s.check_out &&
-                  s.check_in === start
-                ) {
-                  return true;
+                const existingIsDayUse = s.check_in === s.check_out;
+
+                // 기존 예약이 데이유즈, 새 예약이 숙박
+                if (existingIsDayUse && !isDayUse) {
+                  return s.check_in >= start && s.check_in < end;
                 }
 
+                // 기존 예약이 숙박, 새 예약이 데이유즈
+                if (!existingIsDayUse && isDayUse) {
+                  return start >= s.check_in && start < s.check_out;
+                }
+
+                // 데이유즈끼리
+                if (existingIsDayUse && isDayUse) {
+                  return s.check_in === start;
+                }
+
+                // 숙박끼리: 체크아웃/체크인 바톤터치 허용
                 return start < s.check_out && s.check_in < end;
               });
-
               if (!relaxedOverlap) {
                 schedule.push(period);
                 assigned = true;
