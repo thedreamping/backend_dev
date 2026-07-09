@@ -5348,13 +5348,39 @@ export const syncNaverBookingsToRooms = async () => {
       };
 
       // rooms
+      // const [rooms] = await conn.query(
+      //   `SELECT id FROM room WHERE room_group_id = ? ORDER BY id ASC`,
+      //   [groupId],
+      // );
+
+      // const roomSchedules = new Map();
+      // for (const r of rooms) roomSchedules.set(r.id, []);
+
       const [rooms] = await conn.query(
-        `SELECT id FROM room WHERE room_group_id = ? ORDER BY id ASC`,
+        `
+  SELECT id, check_in_and_out_soogie
+  FROM room
+  WHERE room_group_id = ?
+  ORDER BY id ASC
+  `,
         [groupId],
       );
 
       const roomSchedules = new Map();
-      for (const r of rooms) roomSchedules.set(r.id, []);
+
+      for (const r of rooms) {
+        const manualSchedules = safeParse(r.check_in_and_out_soogie)
+          .filter((s) => s.check_in && s.check_out)
+          .map((s) => ({
+            ...s,
+            source: "manual",
+            check_in: toKSTDate(s.check_in),
+            check_out: toKSTDate(s.check_out),
+            is_manual_block: true,
+          }));
+
+        roomSchedules.set(r.id, manualSchedules);
+      }
 
       // =====================================================
       // 5-1. booking + website 합치기 (핵심)
@@ -5469,12 +5495,21 @@ export const syncNaverBookingsToRooms = async () => {
       // 5-3. 저장
       // =====================================================
       for (const room of rooms) {
+        // const schedule = roomSchedules.get(room.id);
+        // if (!schedule.length) continue;
+
+        // schedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
+
+        // const first = schedule[0];
+
         const schedule = roomSchedules.get(room.id);
-        if (!schedule.length) continue;
+        const otaSchedule = schedule.filter((s) => !s.is_manual_block);
 
-        schedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
+        if (!otaSchedule.length) continue;
 
-        const first = schedule[0];
+        otaSchedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
+
+        const first = otaSchedule[0];
 
         await conn.query(
           `
@@ -5496,31 +5531,29 @@ export const syncNaverBookingsToRooms = async () => {
             first.check_in,
             first.check_out,
             JSON.stringify(
-              schedule.map((s) => ({
+              otaSchedule.map((s) => ({
                 check_in: s.check_in,
                 check_out: s.check_out,
                 source: s.source,
               })),
             ),
             JSON.stringify(
-              schedule.map((s) => ({
+              otaSchedule.map((s) => ({
                 booking_id: s.booking_id,
                 reservation_id: s.reservation_id,
                 product_name: s.product_name,
                 payment_date: s.payment_date || null,
                 name: s.name,
                 phone: s.phone,
-
                 price: s.price,
                 qty: s.qty,
-
                 booking_option: s.booking_option,
                 request_memo: s.request_memo,
-
                 check_in: s.check_in,
                 check_out: s.check_out,
               })),
             ),
+            ,
             room.id,
           ],
         );
@@ -5528,7 +5561,7 @@ export const syncNaverBookingsToRooms = async () => {
         // =====================================================
         // history
         // =====================================================
-        for (const s of schedule) {
+        for (const s of otaSchedule) {
           const bookingId =
             s.source === "website"
               ? `SITE_${s.reservation_id}`
