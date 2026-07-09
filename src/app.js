@@ -5766,44 +5766,61 @@ export const syncNaverBookingsToRooms = async () => {
 `);
 
     for (const booking of canceledBookings) {
-      const [result] = await conn.query(
+      // 1) booking_id 우선
+      const [byId] = await conn.query(
         `
-    UPDATE room_booking_history
-    SET canceled = 1
-    WHERE source = 'naver'
-      AND canceled = 0
-      AND (
-        booking_id = ?
-        OR (
-          check_in = ?
-          AND check_out = ?
-          AND guest_name = ?
-          AND guest_phone = ?
-          AND qty = ?
-        )
-      )
-    `,
+  UPDATE room_booking_history
+  SET canceled = 1
+  WHERE source = 'naver'
+    AND canceled = 0
+    AND booking_id = ?
+  `,
+        [String(booking.booking_id)],
+      );
+
+      if (byId.affectedRows > 0) continue;
+
+      // 2) natural fallback 후보 조회
+      const [candidates] = await conn.query(
+        `
+  SELECT id, booking_id
+  FROM room_booking_history
+  WHERE source = 'naver'
+    AND canceled = 0
+    AND check_in = ?
+    AND check_out = ?
+    AND guest_name = ?
+    AND guest_phone = ?
+  `,
         [
-          String(booking.booking_id),
           toKSTDate(booking.check_in),
           toKSTDate(booking.check_out),
           booking.name,
           booking.phone,
-          booking.qty,
         ],
       );
 
-      console.log("🧹 [CANCEL SYNC]", {
-        booking_id: booking.booking_id,
-        affectedRows: result.affectedRows,
-        check_in: toKSTDate(booking.check_in),
-        check_out: toKSTDate(booking.check_out),
-        name: booking.name,
-        phone: booking.phone,
-        qty: booking.qty,
-        price: booking.price,
-        product_name: booking.product_name,
-      });
+      // 3) 정확히 하나일 때만 취소
+      if (candidates.length === 1) {
+        await conn.query(
+          `
+    UPDATE room_booking_history
+    SET canceled = 1
+    WHERE id = ?
+    `,
+          [candidates[0].id],
+        );
+      } else {
+        console.warn("⚠️ [CANCEL FALLBACK SKIP]", {
+          booking_id: booking.booking_id,
+          candidateCount: candidates.length,
+          candidates,
+          name: booking.name,
+          phone: booking.phone,
+          check_in: toKSTDate(booking.check_in),
+          check_out: toKSTDate(booking.check_out),
+        });
+      }
     }
 
     await conn.commit();
