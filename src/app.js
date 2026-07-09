@@ -5443,7 +5443,50 @@ export const syncNaverBookingsToRooms = async () => {
       // =====================================================
       // 5-2. 배정 (바톤터치 유지 핵심)
       // =====================================================
+
+      const makeNaturalKey = (s) => {
+        const optionText =
+          typeof s.booking_option === "string"
+            ? s.booking_option
+            : JSON.stringify(s.booking_option || "");
+
+        return [
+          s.source,
+          s.payment_date || null,
+          s.check_in,
+          s.check_out,
+          s.name,
+          s.phone,
+          s.product_name,
+          s.qty,
+          s.price,
+          optionText,
+          s.request_memo || "",
+        ]
+          .map((v) => String(v ?? "").trim())
+          .join("|");
+      };
+
+      const naturalMap = new Map();
+
       for (const period of allPeriods) {
+        const key = makeNaturalKey(period);
+
+        if (naturalMap.has(key)) {
+          console.log(
+            "⚠️ 중복 예약 배정 제외:",
+            period.booking_id,
+            "=>",
+            naturalMap.get(key).booking_id,
+          );
+          continue;
+        }
+
+        naturalMap.set(key, period);
+      }
+
+      const dedupedPeriods = [...naturalMap.values()];
+      for (const period of dedupedPeriods) {
         const start = period.check_in;
         const end = period.check_out;
 
@@ -5624,45 +5667,68 @@ export const syncNaverBookingsToRooms = async () => {
 
           const [exists] = await conn.query(
             `
-            SELECT id FROM room_booking_history
-            WHERE booking_id = ?
-              AND room_id = ?
-              AND check_in = ?
-              AND check_out = ?
-            LIMIT 1
-          `,
-            [bookingId, room.id, s.check_in, s.check_out],
+  SELECT id, booking_id
+  FROM room_booking_history
+  WHERE source = ?
+    AND room_id = ?
+    AND room_group_id = ?
+    AND check_in = ?
+    AND check_out = ?
+    AND guest_name = ?
+    AND guest_phone = ?
+    AND qty = ?
+    AND price = ?
+    AND product_name <=> ?
+    AND canceled = 0
+  LIMIT 1
+  `,
+            [
+              s.source,
+              room.id,
+              groupId,
+              s.check_in,
+              s.check_out,
+              s.name,
+              s.phone,
+              s.qty,
+              s.price,
+              s.product_name || null,
+            ],
           );
 
           if (exists.length) {
             await conn.query(
               `
-              UPDATE room_booking_history
-              SET payload = ?, canceled = 0
-              WHERE id = ?
-            `,
-              [JSON.stringify(payload), exists[0].id],
+    UPDATE room_booking_history
+    SET
+      payload = ?,
+      room_id = ?,
+      room_group_id = ?,
+      canceled = 0
+    WHERE id = ?
+    `,
+              [JSON.stringify(payload), room.id, groupId, exists[0].id],
             );
           } else {
             await conn.query(
               `
-              INSERT INTO room_booking_history (
-                payload,
-                booking_id,
-                check_in,
-                check_out,
-                room_id,
-                room_group_id,
-                source,
-                guest_name,
-                guest_phone,
-                qty,
-                price,
-                product_name,
-                canceled
-              )
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-            `,
+    INSERT INTO room_booking_history (
+      payload,
+      booking_id,
+      check_in,
+      check_out,
+      room_id,
+      room_group_id,
+      source,
+      guest_name,
+      guest_phone,
+      qty,
+      price,
+      product_name,
+      canceled
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `,
               [
                 JSON.stringify(payload),
                 bookingId,
