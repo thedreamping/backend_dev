@@ -5766,11 +5766,12 @@ export const syncNaverBookingsToRooms = async () => {
 `);
 
     for (const booking of canceledBookings) {
-      await conn.query(
+      const [result] = await conn.query(
         `
     UPDATE room_booking_history
     SET canceled = 1
     WHERE source = 'naver'
+      AND canceled = 0
       AND (
         booking_id = ?
         OR (
@@ -5795,6 +5796,18 @@ export const syncNaverBookingsToRooms = async () => {
           booking.product_name || null,
         ],
       );
+
+      console.log("🧹 [CANCEL SYNC]", {
+        booking_id: booking.booking_id,
+        affectedRows: result.affectedRows,
+        check_in: toKSTDate(booking.check_in),
+        check_out: toKSTDate(booking.check_out),
+        name: booking.name,
+        phone: booking.phone,
+        qty: booking.qty,
+        price: booking.price,
+        product_name: booking.product_name,
+      });
     }
 
     await conn.commit();
