@@ -5679,6 +5679,7 @@ WHERE source = ?
   AND qty = ?
   AND price = ?
   AND product_name <=> ?
+  AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date')) = ?
 LIMIT 1
   `,
             [
@@ -5692,6 +5693,7 @@ LIMIT 1
               s.qty,
               s.price,
               s.product_name || null,
+              s.payment_date || null, // 추가
             ],
           );
 
