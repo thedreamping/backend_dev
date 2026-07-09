@@ -5780,8 +5780,6 @@ export const syncNaverBookingsToRooms = async () => {
           AND guest_name = ?
           AND guest_phone = ?
           AND qty = ?
-          AND price = ?
-          AND product_name <=> ?
         )
       )
     `,
@@ -5792,8 +5790,6 @@ export const syncNaverBookingsToRooms = async () => {
           booking.name,
           booking.phone,
           booking.qty,
-          booking.price,
-          booking.product_name || null,
         ],
       );
 
