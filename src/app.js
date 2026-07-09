@@ -5752,7 +5752,15 @@ export const syncNaverBookingsToRooms = async () => {
     // 6. 네이버 취소건 History 반영
     // =====================================================
     const [canceledBookings] = await conn.query(`
-  SELECT booking_id
+  SELECT
+    booking_id,
+    name,
+    phone,
+    product_name,
+    qty,
+    price,
+    check_in,
+    check_out
   FROM naver_bookings
   WHERE cancel_date2 IS NOT NULL
 `);
@@ -5762,10 +5770,30 @@ export const syncNaverBookingsToRooms = async () => {
         `
     UPDATE room_booking_history
     SET canceled = 1
-    WHERE booking_id = ?
-      AND source = 'naver'
+    WHERE source = 'naver'
+      AND (
+        booking_id = ?
+        OR (
+          check_in = ?
+          AND check_out = ?
+          AND guest_name = ?
+          AND guest_phone = ?
+          AND qty = ?
+          AND price = ?
+          AND product_name <=> ?
+        )
+      )
     `,
-        [String(booking.booking_id)],
+        [
+          String(booking.booking_id),
+          toKSTDate(booking.check_in),
+          toKSTDate(booking.check_out),
+          booking.name,
+          booking.phone,
+          booking.qty,
+          booking.price,
+          booking.product_name || null,
+        ],
       );
     }
 
