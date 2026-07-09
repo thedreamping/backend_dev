@@ -5746,9 +5746,29 @@ WHERE id = ?
         }
       }
     }
-    // =====================================================
-    // 6. 네이버 취소건 History 반영
-    // =====================================================
+
+    await conn.query(`
+  DELETE h1
+  FROM room_booking_history h1
+  JOIN room_booking_history h2
+    ON h1.id > h2.id
+   AND h1.source = h2.source
+   AND h1.booking_id = h2.booking_id
+   AND h1.check_in = h2.check_in
+   AND h1.check_out = h2.check_out
+   AND h1.guest_name = h2.guest_name
+   AND h1.guest_phone = h2.guest_phone
+   AND h1.qty = h2.qty
+   AND h1.price = h2.price
+   AND h1.product_name <=> h2.product_name
+`);
+
+    await conn.query(`
+  UPDATE room_booking_history
+  SET canceled = 0
+  WHERE source = 'naver'
+`);
+
     const [canceledBookings] = await conn.query(`
   SELECT
     booking_id,
