@@ -4947,32 +4947,44 @@ app.get("/api/reservation_history", async (req, res) => {
     }
 
     // 결제일 검색
-    // 네이버 / 홈페이지만. 수기는 payment_date 없으므로 제외.
-    // DB에 UTC로 들어간 payment_date를 KST 기준 날짜로 보정해서 검색.
-    if (payment_from && payment_to) {
-      where.push(`
-        source != 'manual'
-        AND DATE(
-          DATE_ADD(
-            CASE
-              WHEN source = 'website' OR booking_id LIKE 'SITE_%' THEN created_at
-              ELSE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))
-            END,
-            INTERVAL 9 HOUR
-          )
-        ) >= ?
-        AND DATE(
-          DATE_ADD(
-            CASE
-              WHEN source = 'website' OR booking_id LIKE 'SITE_%' THEN created_at
-              ELSE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date'))
-            END,
-            INTERVAL 9 HOUR
-          )
-        ) <= ?
-      `);
+    // 네이버 / 홈페이지만 검색하고 수기예약은 제외
+    const paymentDateSql = `
+  CASE
+    WHEN source = 'website'
+      OR source LIKE 'SITE_%'
+      OR booking_id LIKE 'SITE_%'
+    THEN DATE_ADD(created_at, INTERVAL 9 HOUR)
 
-      params.push(payment_from, payment_to);
+    ELSE DATE_ADD(
+      STR_TO_DATE(
+        SUBSTRING(
+          JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date')),
+          1,
+          19
+        ),
+        '%Y-%m-%dT%H:%i:%s'
+      ),
+      INTERVAL 9 HOUR
+    )
+  END
+`;
+
+    if (payment_from) {
+      where.push(`
+    source != 'manual'
+    AND ${paymentDateSql} >= ?
+  `);
+
+      params.push(`${payment_from} 00:00:00`);
+    }
+
+    if (payment_to) {
+      where.push(`
+    source != 'manual'
+    AND ${paymentDateSql} < DATE_ADD(?, INTERVAL 1 DAY)
+  `);
+
+      params.push(`${payment_to} 00:00:00`);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
