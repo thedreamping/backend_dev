@@ -5068,6 +5068,17 @@ app.get("/api/reservation_infos", async (req, res) => {
     let where = [];
     let params = [];
 
+    // 결제내역 노출 조건
+    // 1) PENDING 제외
+    // 2) CANCELLED/CANCELED는 실제 환불금액이 있는 건만 노출
+    where.push(`
+  COALESCE(status, '') != 'PENDING'
+  AND (
+    COALESCE(status, '') NOT IN ('CANCELLED', 'CANCELED')
+    OR COALESCE(refund_amount, 0) > 0
+  )
+`);
+
     // 이름 검색
     if (buyer_name) {
       where.push(`buyer_name LIKE ?`);
@@ -5081,7 +5092,7 @@ app.get("/api/reservation_infos", async (req, res) => {
     }
 
     if (check_in_to) {
-      where.push(`check_in <= ?`);
+      where.push(`check_in < DATE_ADD(?, INTERVAL 1 DAY)`);
       params.push(check_in_to);
     }
 
@@ -5092,7 +5103,7 @@ app.get("/api/reservation_infos", async (req, res) => {
     }
 
     if (check_out_to) {
-      where.push(`check_out <= ?`);
+      where.push(`check_out < DATE_ADD(?, INTERVAL 1 DAY)`);
       params.push(check_out_to);
     }
 
