@@ -2645,7 +2645,6 @@ const messageService = new SolapiMessageService(
   process.env.SOL_API_KEY,
   process.env.SOL_API_SECRET,
 );
-
 app.post("/api/reservation", async (req, res) => {
   try {
     const {
@@ -2659,6 +2658,7 @@ app.post("/api/reservation", async (req, res) => {
       options,
       price,
       qty,
+      method,
     } = req.body;
 
     if (!name || !phone || !startDate || !endDate || !roomInfo) {
@@ -2670,12 +2670,20 @@ app.post("/api/reservation", async (req, res) => {
 
     const numericPrice = Number(price);
 
-    if (isNaN(numericPrice) || numericPrice <= 0) {
+    if (Number.isNaN(numericPrice) || numericPrice <= 0) {
       return res.status(400).json({
         ok: false,
         message: "금액 오류",
       });
     }
+
+    const allowedMethods = ["CARD", "EPAY", "BANK"];
+
+    const paymentMethod = allowedMethods.includes(
+      String(method || "").toUpperCase(),
+    )
+      ? String(method).toUpperCase()
+      : "CARD";
 
     const check_in = startDate;
     const check_out = endDate;
@@ -2686,7 +2694,6 @@ app.post("/api/reservation", async (req, res) => {
 
     const [result] = await pool.query(
       `
-    
       INSERT INTO reservations_info
       (
         room_id,
@@ -2702,13 +2709,14 @@ app.post("/api/reservation", async (req, res) => {
         memo,
         options,
         qty,
+        method,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?,?, NOW(), NOW())
+      VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
-        roomInfo.room_group_id,
+        roomInfo.room_id || roomInfo.room_group_id,
         roomInfo.room_group_id,
         check_in,
         check_out,
@@ -2719,7 +2727,8 @@ app.post("/api/reservation", async (req, res) => {
         email ? email.trim() : null,
         memo ? memo.trim() : null,
         options ? JSON.stringify(options) : null,
-        qty,
+        Number(qty) || 1,
+        paymentMethod,
       ],
     );
 
@@ -2736,7 +2745,6 @@ app.post("/api/reservation", async (req, res) => {
     });
   }
 });
-
 const formatDateForSms = (date) => {
   const d = new Date(date);
   const yyyy = d.getFullYear();
