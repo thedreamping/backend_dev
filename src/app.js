@@ -4950,7 +4950,8 @@ app.get("/api/reservation_history", async (req, res) => {
     // 네이버 / 홈페이지만 검색하고 수기예약은 제외
     const paymentDateSql = `
   CASE
-    WHEN source = 'website'
+    WHEN source = 'manual'
+      OR source = 'website'
       OR source LIKE 'SITE_%'
       OR booking_id LIKE 'SITE_%'
     THEN DATE_ADD(created_at, INTERVAL 9 HOUR)
@@ -4971,8 +4972,7 @@ app.get("/api/reservation_history", async (req, res) => {
 
     if (payment_from) {
       where.push(`
-    source != 'manual'
-    AND ${paymentDateSql} >= ?
+    ${paymentDateSql} >= ?
   `);
 
       params.push(`${payment_from} 00:00:00`);
@@ -4980,8 +4980,7 @@ app.get("/api/reservation_history", async (req, res) => {
 
     if (payment_to) {
       where.push(`
-    source != 'manual'
-    AND ${paymentDateSql} < DATE_ADD(?, INTERVAL 1 DAY)
+    ${paymentDateSql} < DATE_ADD(?, INTERVAL 1 DAY)
   `);
 
       params.push(`${payment_to} 00:00:00`);
