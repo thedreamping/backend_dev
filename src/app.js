@@ -2171,6 +2171,14 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
       check_in: String(manual_booking.check_in).slice(0, 10),
       check_out: String(manual_booking.check_out).slice(0, 10),
       memo: manual_booking.memo || "",
+
+      custom_room_no: Array.isArray(manual_booking.custom_room_no)
+        ? manual_booking.custom_room_no
+        : manual_booking.custom_room_no
+          ? [manual_booking.custom_room_no]
+          : [],
+
+      custom_name: manual_booking.custom_name || "",
     };
 
     const duplicated = schedules.some((booking) => {
@@ -2181,9 +2189,16 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
       );
     });
 
-    if (!duplicated) {
-      schedules.push(newBooking);
+    if (duplicated) {
+      await conn.rollback();
+
+      return res.status(409).json({
+        ok: false,
+        message: "동일 기간의 수기예약이 이미 존재합니다.",
+      });
     }
+
+    schedules.push(newBooking);
 
     schedules.sort((a, b) => {
       return String(a.check_in).localeCompare(String(b.check_in));
@@ -2208,12 +2223,19 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
     const payload = {
       booking_id: manualBookingId,
       product_name: "수기예약",
-      name: "",
+
+      name: newBooking.custom_name || "",
       phone: "",
+
       price: 0,
       qty: 1,
+
       booking_option: null,
       request_memo: newBooking.memo || "",
+
+      custom_room_no: newBooking.custom_room_no || [],
+      custom_name: newBooking.custom_name || "",
+
       check_in: newBooking.check_in,
       check_out: newBooking.check_out,
     };
@@ -2239,7 +2261,7 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
   SELECT
     ?, ?, ?, ?, r.id, r.room_group_id,
     'manual',
-    '',
+    ?,
     '',
     1,
     0,
@@ -2254,6 +2276,7 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
         manualBookingId,
         newBooking.check_in,
         newBooking.check_out,
+        newBooking.custom_name || "",
         newBooking.memo || "",
         id,
       ],
