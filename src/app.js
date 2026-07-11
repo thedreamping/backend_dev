@@ -2835,6 +2835,7 @@ const messageService = new SolapiMessageService(
   process.env.SOL_API_KEY,
   process.env.SOL_API_SECRET,
 );
+
 app.post("/api/reservation", async (req, res) => {
   try {
     const {
@@ -2849,6 +2850,7 @@ app.post("/api/reservation", async (req, res) => {
       price,
       qty,
       method,
+      count,
     } = req.body;
 
     if (!name || !phone || !startDate || !endDate || !roomInfo) {
@@ -2882,6 +2884,16 @@ app.post("/api/reservation", async (req, res) => {
       (new Date(check_out) - new Date(check_in)) / (1000 * 60 * 60 * 24),
     );
 
+    /*
+     * count는 객실별 인원/반려견 정보
+     * 예:
+     * [
+     *   { people: 2, pets: 1 },
+     *   { people: 3, pets: 0 }
+     * ]
+     */
+    const countData = Array.isArray(count) ? count : [];
+
     const [result] = await pool.query(
       `
       INSERT INTO reservations_info
@@ -2900,10 +2912,11 @@ app.post("/api/reservation", async (req, res) => {
         options,
         qty,
         method,
+        \`count\`,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
         roomInfo.room_id || roomInfo.room_group_id,
@@ -2919,6 +2932,7 @@ app.post("/api/reservation", async (req, res) => {
         options ? JSON.stringify(options) : null,
         Number(qty) || 1,
         paymentMethod,
+        JSON.stringify(countData),
       ],
     );
 
@@ -2935,6 +2949,7 @@ app.post("/api/reservation", async (req, res) => {
     });
   }
 });
+
 const formatDateForSms = (date) => {
   const d = new Date(date);
   const yyyy = d.getFullYear();
