@@ -1046,84 +1046,236 @@ app.post("/api/main-dining-banner", upload.array("file"), async (req, res) => {
   }
 });
 
-app.post("/api/main-event-popup", upload.array("file"), async (req, res) => {
+app.get("/api/main-event-popup", async (req, res) => {
   try {
+    const [rows] = await pool.query(`
+      SELECT
+        id,
+        title,
+        width,
+        height,
+        file_url,
+        file_name,
+        link,
+        sort_order,
+        DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+        DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date
+      FROM main_popup
+      WHERE is_use = 1
+        AND (
+          start_date IS NULL
+          OR start_date <= CURDATE()
+        )
+        AND (
+          end_date IS NULL
+          OR end_date >= CURDATE()
+        )
+      ORDER BY sort_order ASC, id ASC
+    `);
+
+    return res.json({
+      ok: true,
+      data: rows,
+    });
+  } catch (err) {
+    console.error("client main-popup fetch error:", err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "이벤트 팝업 조회 중 오류가 발생했습니다.",
+    });
+  }
+});
+app.post("/api/main-event-popup", upload.array("file"), async (req, res) => {
+  const conn = await pool.getConnection();
+
+  const normalizeToArray = (value) => {
+    if (value === undefined || value === null) return [];
+    return Array.isArray(value) ? value : [value];
+  };
+
+  try {
+    await conn.beginTransaction();
+
     const files = req.files || [];
 
-    // multer + formData 특성상
-    const normalizeToArray = (value) => {
-      if (value === undefined || value === null) return [];
-      return Array.isArray(value) ? value : [value];
-    };
-
-    const file_name = normalizeToArray(req.body.file_name);
+    const title = normalizeToArray(req.body.title);
+    const fileName = normalizeToArray(req.body.file_name);
     const width = normalizeToArray(req.body.width);
     const height = normalizeToArray(req.body.height);
     const link = normalizeToArray(req.body.link);
-    const file_url = normalizeToArray(req.body.file_url);
-    const is_use = normalizeToArray(req.body.is_use);
-    const file_index = normalizeToArray(req.body.file_index); // 새 파일의 슬라이드 index
+    const fileUrl = normalizeToArray(req.body.file_url);
+    const isUse = normalizeToArray(req.body.is_use);
+    const startDate = normalizeToArray(req.body.start_date);
+    const endDate = normalizeToArray(req.body.end_date);
+    const sortOrder = normalizeToArray(req.body.sort_order);
+    const fileIndex = normalizeToArray(req.body.file_index);
 
-    // 필수값 체크
+    const rowCount = width.length;
+
     if (
-      !width.length ||
-      width.length !== link.length ||
-      height.length !== width.length ||
-      height.length !== is_use.length
+      rowCount === 0 ||
+      height.length !== rowCount ||
+      link.length !== rowCount ||
+      fileName.length !== rowCount ||
+      fileUrl.length !== rowCount ||
+      isUse.length !== rowCount ||
+      startDate.length !== rowCount ||
+      endDate.length !== rowCount ||
+      sortOrder.length !== rowCount
     ) {
-      return res.status(400).json({ message: "데이터 형식 오류" });
+      await conn.rollback();
+
+      return res.status(400).json({
+        ok: false,
+        message: "팝업 데이터 형식이 올바르지 않습니다.",
+      });
     }
 
-    // 🔥 기존 데이터 전체 삭제
-    await pool.query("DELETE FROM main_popup");
+    /*
+     * 업로드된 파일을 화면 행 index와 연결
+     *
+     * fileMap = {
+     *   0: "/uploads/파일명.jpg",
+     *   2: "/uploads/파일명2.jpg"
+     * }
+     */
+    const fileMap = {};
 
-    // 새 파일과 슬라이드를 index로 매칭
-    const fileMap = {}; // index: fileUrl
-    files.forEach((file, idx) => {
-      const index = parseInt(file_index[idx], 10);
-      if (!isNaN(index)) {
-        fileMap[index] = `/uploads/${file.filename}`;
+    files.forEach((file, index) => {
+      const rowIndex = Number(fileIndex[index]);
+
+      if (Number.isInteger(rowIndex)) {
+        fileMap[rowIndex] = `/uploads/${file.filename}`;
       }
     });
 
-    for (let i = 0; i < width.length; i++) {
-      let finalFileUrl;
+    const insertRows = [];
 
-      // 새 파일이 있으면 해당 index에서 가져오기
-      if (fileMap[i]) {
-        finalFileUrl = fileMap[i];
-      }
-      // 새 파일 없으면 기존 파일 유지
-      else if (file_url[i] !== undefined && file_url[i] !== "") {
-        finalFileUrl = file_url[i];
-      }
-      // 둘 다 없으면 에러
-      else {
+    for (let i = 0; i < rowCount; i++) {
+      const popupWidth = Number(width[i]);
+      const popupHeight = Number(height[i]);
+      const popupIsUse = Number(isUse[i]) === 1 ? 1 : 0;
+      const popupSortOrder = Number(sortOrder[i]) || i + 1;
+
+      const popupStartDate = startDate[i] || null;
+      const popupEndDate = endDate[i] || null;
+
+      const finalFileUrl =
+        fileMap[i] ||
+        (fileUrl[i] && fileUrl[i].trim() !== "" ? fileUrl[i] : null);
+
+      if (!finalFileUrl) {
+        await conn.rollback();
+
         return res.status(400).json({
-          message: `이미지 파일이 누락되었습니다. index: ${i}`,
+          ok: false,
+          message: `${i + 1}번 팝업의 이미지가 누락되었습니다.`,
         });
       }
 
-      await pool.query(
-        `
-        INSERT INTO main_popup (file_name, width, link, file_url, height, is_use)
-        VALUES (?, ?, ?, ?, ?, ?)
-        `,
-        [
-          file_name[i] || "",
-          width[i],
-          link[i],
-          finalFileUrl,
-          height[i],
-          is_use[i],
-        ],
-      );
+      if (!popupWidth || popupWidth <= 0) {
+        await conn.rollback();
+
+        return res.status(400).json({
+          ok: false,
+          message: `${i + 1}번 팝업의 너비를 확인해주세요.`,
+        });
+      }
+
+      if (!popupHeight || popupHeight <= 0) {
+        await conn.rollback();
+
+        return res.status(400).json({
+          ok: false,
+          message: `${i + 1}번 팝업의 높이를 확인해주세요.`,
+        });
+      }
+
+      if (!link[i] || !link[i].trim()) {
+        await conn.rollback();
+
+        return res.status(400).json({
+          ok: false,
+          message: `${i + 1}번 팝업의 링크를 입력해주세요.`,
+        });
+      }
+
+      // 시작일과 종료일은 둘 다 입력하거나 둘 다 비워두기
+      if (
+        (popupStartDate && !popupEndDate) ||
+        (!popupStartDate && popupEndDate)
+      ) {
+        await conn.rollback();
+
+        return res.status(400).json({
+          ok: false,
+          message: `${i + 1}번 팝업의 게시 시작일과 종료일을 모두 입력해주세요.`,
+        });
+      }
+
+      if (popupStartDate && popupEndDate && popupStartDate > popupEndDate) {
+        await conn.rollback();
+
+        return res.status(400).json({
+          ok: false,
+          message: `${i + 1}번 팝업의 게시 시작일이 종료일보다 늦습니다.`,
+        });
+      }
+
+      insertRows.push([
+        title[i] || "",
+        fileName[i] || "",
+        popupWidth,
+        link[i],
+        finalFileUrl,
+        popupHeight,
+        popupIsUse,
+        popupStartDate,
+        popupEndDate,
+        popupSortOrder,
+      ]);
     }
 
-    return res.json({ ok: true });
+    // 모든 데이터 검증이 끝난 뒤 기존 데이터 삭제
+    await conn.query("DELETE FROM main_popup");
+
+    await conn.query(
+      `
+        INSERT INTO main_popup (
+          title,
+          file_name,
+          width,
+          link,
+          file_url,
+          height,
+          is_use,
+          start_date,
+          end_date,
+          sort_order
+        )
+        VALUES ?
+        `,
+      [insertRows],
+    );
+
+    await conn.commit();
+
+    return res.json({
+      ok: true,
+      message: "메인 이벤트 팝업이 저장되었습니다.",
+    });
   } catch (err) {
+    await conn.rollback();
+
     console.error("main-popup save error:", err);
-    return res.status(500).json({ message: "서버 오류" });
+
+    return res.status(500).json({
+      ok: false,
+      message: "메인 이벤트 팝업 저장 중 서버 오류가 발생했습니다.",
+    });
+  } finally {
+    conn.release();
   }
 });
 
@@ -1257,10 +1409,24 @@ app.get("/api/get-main-dining-banner", async (req, res) => {
     });
   }
 });
-
 app.get("/api/get-main-event-popup", async (req, res) => {
   try {
-    const [rows] = await pool.query(`SELECT * FROM main_popup ORDER BY id ASC`);
+    const [rows] = await pool.query(`
+      SELECT
+        id,
+        title,
+        width,
+        height,
+        file_url,
+        file_name,
+        link,
+        is_use,
+        sort_order,
+        DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+        DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date
+      FROM main_popup
+      ORDER BY sort_order ASC, id ASC
+    `);
 
     return res.json({
       ok: true,
@@ -1268,9 +1434,10 @@ app.get("/api/get-main-event-popup", async (req, res) => {
     });
   } catch (err) {
     console.error("main_popup fetch error:", err);
+
     return res.status(500).json({
       ok: false,
-      message: "메인 룸 배너 조회 중 오류 발생",
+      message: "메인 이벤트 팝업 조회 중 오류가 발생했습니다.",
     });
   }
 });
