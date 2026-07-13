@@ -5547,19 +5547,31 @@ export const syncNaverBookingsToRooms = async () => {
         if (n.includes("오페라")) return "오페라글램핑";
 
         // 피크닉 R = 레귤러테이블
-        if (n.includes("피크닉레귤러테이블") || n.includes("피크닉레귤러")) {
+        if (
+          n.includes("피크닉레귤러테이블") ||
+          n.includes("피크닉데이레귤러테이블") ||
+          n.includes("피크닉레귤러") ||
+          n.includes("피크닉데이레귤러")
+        ) {
           return n.includes("2부") ? "피크닉r2부" : "피크닉r1부";
         }
 
         // 피크닉 L = 라지테이블
-        if (n.includes("피크닉라지테이블") || n.includes("피크닉라지")) {
+        if (
+          n.includes("피크닉라지테이블") ||
+          n.includes("피크닉데이라지테이블") ||
+          n.includes("피크닉라지") ||
+          n.includes("피크닉데이라지")
+        ) {
           return n.includes("2부") ? "피크닉l2부" : "피크닉l1부";
         }
 
         // 피크닉 G = 자이언트테이블
         if (
           n.includes("피크닉자이언트테이블") ||
-          n.includes("피크닉자이언트")
+          n.includes("피크닉데이자이언트테이블") ||
+          n.includes("피크닉자이언트") ||
+          n.includes("피크닉데이자이언트")
         ) {
           return n.includes("2부") ? "피크닉g2부" : "피크닉g1부";
         }
