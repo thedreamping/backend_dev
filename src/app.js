@@ -2471,9 +2471,7 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
   const parseSchedule = (value) => {
     if (!value) return [];
 
-    if (Array.isArray(value)) {
-      return value;
-    }
+    if (Array.isArray(value)) return value;
 
     if (typeof value === "string") {
       try {
@@ -2493,26 +2491,52 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
     const { id } = req.params;
     const { manual_booking } = req.body;
 
+    const isExtra = String(id).startsWith("EXTRA_");
+
     if (!manual_booking?.check_in || !manual_booking?.check_out) {
       await conn.rollback();
+
       return res.status(400).json({
         ok: false,
         message: "check_in, check_out 필수",
       });
     }
 
-    const [rows] = await conn.query(
-      `
-      SELECT check_in_and_out_soogie
-      FROM room
-      WHERE id = ?
-      FOR UPDATE
-      `,
-      [id],
-    );
+    let rows = [];
+
+    if (isExtra) {
+      await conn.query(
+        `
+    UPDATE room_extra
+    SET
+      check_in_and_out_soogie = ?,
+      is_soogie = 1,
+      is_active = 0,
+      is_ota = 0,
+      reason = '수기예약'
+    WHERE extra_id = ?
+    `,
+        [JSON.stringify(schedules), id],
+      );
+    } else {
+      await conn.query(
+        `
+    UPDATE room
+    SET
+      check_in_and_out_soogie = ?,
+      is_soogie = 1,
+      is_active = 0,
+      is_ota = 0,
+      reason = '수기예약'
+    WHERE id = ?
+    `,
+        [JSON.stringify(schedules), id],
+      );
+    }
 
     if (!rows.length) {
       await conn.rollback();
+
       return res.status(404).json({
         ok: false,
         message: "객실 없음",
@@ -2555,25 +2579,38 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
 
     schedules.push(newBooking);
 
-    schedules.sort((a, b) => {
-      return String(a.check_in).localeCompare(String(b.check_in));
-    });
-
-    await conn.query(
-      `
-      UPDATE room
-      SET 
-        check_in_and_out_soogie = ?,
-        is_soogie = 1,
-        is_active = 0,
-        is_ota = 0,
-        reason = '수기예약'
-      WHERE id = ?
-      `,
-      [JSON.stringify(schedules), id],
+    schedules.sort((a, b) =>
+      String(a.check_in).localeCompare(String(b.check_in)),
     );
 
-    const manualBookingId = `MANUAL_${id}_${newBooking.check_in}_${newBooking.check_out}_${Date.now()}`;
+    if (isExtra) {
+      await conn.query(
+        `
+        UPDATE room_extra
+        SET check_in_and_out_soogie = ?
+        WHERE extra_id = ?
+        `,
+        [JSON.stringify(schedules), id],
+      );
+    } else {
+      await conn.query(
+        `
+        UPDATE room
+        SET
+          check_in_and_out_soogie = ?,
+          is_soogie = 1,
+          is_active = 0,
+          is_ota = 0,
+          reason = '수기예약'
+        WHERE id = ?
+        `,
+        [JSON.stringify(schedules), id],
+      );
+    }
+
+    const manualBookingId =
+      `MANUAL_${id}_${newBooking.check_in}_` +
+      `${newBooking.check_out}_${Date.now()}`;
 
     const payload = {
       booking_id: manualBookingId,
@@ -2597,43 +2634,33 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
 
     await conn.query(
       `
-  INSERT INTO room_booking_history (
-    payload,
-    booking_id,
-    check_in,
-    check_out,
-    room_id,
-    room_group_id,
-    source,
-    guest_name,
-    guest_phone,
-    qty,
-    price,
-    product_name,
-    memo,
-    canceled
-  )
-  SELECT
-    ?, ?, ?, ?, r.id, r.room_group_id,
-    'manual',
-    ?,
-    '',
-    1,
-    0,
-    '수기예약',
-    ?,
-    0
-  FROM room r
-  WHERE r.id = ?
-  `,
+      INSERT INTO room_booking_history (
+        payload,
+        booking_id,
+        check_in,
+        check_out,
+        room_id,
+        room_group_id,
+        source,
+        guest_name,
+        guest_phone,
+        qty,
+        price,
+        product_name,
+        memo,
+        canceled
+      )
+      VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, '', 1, 0, '수기예약', ?, 0)
+      `,
       [
         JSON.stringify(payload),
         manualBookingId,
         newBooking.check_in,
         newBooking.check_out,
+        id,
+        rows[0].room_group_id,
         newBooking.custom_name || "",
         newBooking.memo || "",
-        id,
       ],
     );
 
@@ -2646,6 +2673,7 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
     });
   } catch (err) {
     await conn.rollback();
+
     console.error("manual booking append error:", err);
 
     return res.status(500).json({
