@@ -5857,34 +5857,10 @@ app.post("/api/extra-room", async (req, res) => {
 export const syncNaverBookingsToRooms = async () => {
   const conn = await pool.getConnection();
 
-  const toKSTDate = (date) => {
-    if (!date) return "";
-
-    const parsedDate = new Date(date);
-
-    if (Number.isNaN(parsedDate.getTime())) {
-      return "";
-    }
-
-    return new Intl.DateTimeFormat("sv-SE", {
+  const toKSTDate = (date) =>
+    new Intl.DateTimeFormat("sv-SE", {
       timeZone: "Asia/Seoul",
-    }).format(parsedDate);
-  };
-
-  const canUseRoomForPeriod = (room, start, end) => {
-    if (room.room_type !== "extra") {
-      return true;
-    }
-
-    const extraStart = toKSTDate(room.start_date);
-    const extraEnd = toKSTDate(room.end_date);
-
-    if (!extraStart || !extraEnd) {
-      return false;
-    }
-
-    return start >= extraStart && end <= extraEnd;
-  };
+    }).format(new Date(date));
 
   const normalize = (str) =>
     (str || "").replace(/[^가-힣a-zA-Z0-9]/g, "").toLowerCase();
@@ -5943,6 +5919,7 @@ export const syncNaverBookingsToRooms = async () => {
         buyer_name,
         buyer_tel,
         total_amount,
+        created_at AS payment_date,
         check_in,
         check_out,
         options,
@@ -5972,20 +5949,6 @@ export const syncNaverBookingsToRooms = async () => {
         naver_crawling_info = JSON_ARRAY(),
         is_ota = 0
     `);
-
-    await conn.query(`
-  UPDATE extra_room
-  SET
-    is_active = 1,
-    available = 1,
-    disable_start = NULL,
-    disable_end = NULL,
-    check_in = NULL,
-    check_out = NULL,
-    check_in_and_out = JSON_ARRAY(),
-    naver_crawling_info = JSON_ARRAY(),
-    is_ota = 0
-`);
 
     // =====================================================
     // 5. group loop
@@ -6063,38 +6026,15 @@ export const syncNaverBookingsToRooms = async () => {
       // const roomSchedules = new Map();
       // for (const r of rooms) roomSchedules.set(r.id, []);
 
-      const [normalRooms] = await conn.query(
+      const [rooms] = await conn.query(
         `
-  SELECT
-    id,
-    check_in_and_out_soogie,
-    NULL AS start_date,
-    NULL AS end_date,
-    'normal' AS room_type
+  SELECT id, check_in_and_out_soogie
   FROM room
   WHERE room_group_id = ?
   ORDER BY id ASC
   `,
         [groupId],
       );
-
-      const [extraRooms] = await conn.query(
-        `
-  SELECT
-    extra_id AS id,
-    check_in_and_out_soogie,
-    start_date,
-    end_date,
-    'extra' AS room_type
-  FROM extra_room
-  WHERE room_group_id = ?
-    AND is_active = 1
-  ORDER BY id ASC
-  `,
-        [groupId],
-      );
-
-      const rooms = [...normalRooms, ...extraRooms];
 
       const roomSchedules = new Map();
 
@@ -6147,6 +6087,7 @@ export const syncNaverBookingsToRooms = async () => {
         if (Number(r.room_group_id) !== Number(groupId)) continue;
 
         allPeriods.push({
+          payment_date: r.payment_date,
           product_name: groupNameMap.get(r.room_group_id),
           source: "website",
           reservation_id: r.id,
@@ -6208,6 +6149,24 @@ export const syncNaverBookingsToRooms = async () => {
       }
 
       const dedupedPeriods = [...naturalMap.values()];
+
+      dedupedPeriods.sort((a, b) => {
+        const checkInCompare = a.check_in.localeCompare(b.check_in);
+        if (checkInCompare !== 0) return checkInCompare;
+
+        const checkOutCompare = a.check_out.localeCompare(b.check_out);
+        if (checkOutCompare !== 0) return checkOutCompare;
+
+        const paymentA = String(a.payment_date || "");
+        const paymentB = String(b.payment_date || "");
+
+        const paymentCompare = paymentA.localeCompare(paymentB);
+        if (paymentCompare !== 0) return paymentCompare;
+
+        return String(a.booking_id || "").localeCompare(
+          String(b.booking_id || ""),
+        );
+      });
       for (const period of dedupedPeriods) {
         const start = period.check_in;
         const end = period.check_out;
@@ -6219,9 +6178,6 @@ export const syncNaverBookingsToRooms = async () => {
 
           // 1차 배정
           for (const room of rooms) {
-            if (!canUseRoomForPeriod(room, start, end)) {
-              continue;
-            }
             const schedule = roomSchedules.get(room.id);
 
             const strictOverlap = schedule.some((s) => {
@@ -6253,9 +6209,6 @@ export const syncNaverBookingsToRooms = async () => {
           // 2차 바톤터치
           if (!assigned) {
             for (const room of rooms) {
-              if (!canUseRoomForPeriod(room, start, end)) {
-                continue;
-              }
               const schedule = roomSchedules.get(room.id);
 
               const relaxedOverlap = schedule.some((s) => {
@@ -6296,6 +6249,70 @@ export const syncNaverBookingsToRooms = async () => {
       // =====================================================
       // 5-3. 저장
       // =====================================================
+
+      const assignedRoomMap = new Map();
+
+      for (const room of rooms) {
+        const schedule = roomSchedules.get(room.id) || [];
+        const otaSchedule = schedule.filter((s) => !s.is_manual_block);
+
+        for (const s of otaSchedule) {
+          const bookingId =
+            s.source === "website"
+              ? `SITE_${s.reservation_id}`
+              : String(s.booking_id);
+
+          const assignmentKey = [
+            s.source,
+            bookingId,
+            groupId,
+            s.check_in,
+            s.check_out,
+          ].join("|");
+
+          if (!assignedRoomMap.has(assignmentKey)) {
+            assignedRoomMap.set(assignmentKey, {
+              source: s.source,
+              bookingId,
+              groupId,
+              checkIn: s.check_in,
+              checkOut: s.check_out,
+              roomIds: new Set(),
+            });
+          }
+
+          assignedRoomMap.get(assignmentKey).roomIds.add(String(room.id));
+        }
+      }
+
+      for (const assignment of assignedRoomMap.values()) {
+        const currentRoomIds = [...assignment.roomIds];
+
+        if (!currentRoomIds.length) continue;
+
+        const placeholders = currentRoomIds.map(() => "?").join(", ");
+
+        await conn.query(
+          `
+    DELETE FROM room_booking_history
+    WHERE source = ?
+      AND booking_id = ?
+      AND room_group_id = ?
+      AND check_in = ?
+      AND check_out = ?
+      AND canceled = 0
+      AND CAST(room_id AS CHAR) NOT IN (${placeholders})
+    `,
+          [
+            assignment.source,
+            assignment.bookingId,
+            assignment.groupId,
+            assignment.checkIn,
+            assignment.checkOut,
+            ...currentRoomIds,
+          ],
+        );
+      }
       for (const room of rooms) {
         // const schedule = roomSchedules.get(room.id);
         // if (!schedule.length) continue;
@@ -6321,88 +6338,53 @@ export const syncNaverBookingsToRooms = async () => {
         otaSchedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
 
         const first = schedule[0];
-        const historyRoomId = String(room.id);
 
-        const checkInOutJson = JSON.stringify(
-          otaSchedule.map((s) => ({
-            check_in: s.check_in,
-            check_out: s.check_out,
-            source: s.source,
-          })),
+        await conn.query(
+          `
+          UPDATE room
+          SET
+            is_active = 0,
+            available = 0,
+            disable_start = ?,
+            disable_end = ?,
+            check_in = ?,
+            check_out = ?,
+            check_in_and_out = ?,
+            naver_crawling_info = ?
+          WHERE id = ?
+        `,
+          [
+            first.check_in,
+            first.check_out,
+            first.check_in,
+            first.check_out,
+            JSON.stringify(
+              otaSchedule.map((s) => ({
+                check_in: s.check_in,
+                check_out: s.check_out,
+                source: s.source,
+              })),
+            ),
+            JSON.stringify(
+              otaSchedule.map((s) => ({
+                booking_id: s.booking_id,
+                reservation_id: s.reservation_id,
+                product_name: s.product_name,
+                payment_date: s.payment_date || null,
+                name: s.name,
+                phone: s.phone,
+                price: s.price,
+                qty: s.qty,
+                booking_option: s.booking_option,
+                request_memo: s.request_memo,
+                check_in: s.check_in,
+                check_out: s.check_out,
+              })),
+            ),
+
+            room.id,
+          ],
         );
-
-        const crawlingInfoJson = JSON.stringify(
-          otaSchedule.map((s) => ({
-            booking_id: s.booking_id,
-            reservation_id: s.reservation_id,
-            product_name: s.product_name,
-            payment_date: s.payment_date || null,
-            name: s.name,
-            phone: s.phone,
-            price: s.price,
-            qty: s.qty,
-            booking_option: s.booking_option,
-            request_memo: s.request_memo,
-            check_in: s.check_in,
-            check_out: s.check_out,
-          })),
-        );
-
-        if (room.room_type === "extra") {
-          await conn.query(
-            `
-    UPDATE extra_room
-    SET
-      is_active = 0,
-      available = 0,
-      disable_start = ?,
-      disable_end = ?,
-      check_in = ?,
-      check_out = ?,
-      check_in_and_out = ?,
-      naver_crawling_info = ?,
-      is_ota = ?
-    WHERE extra_id = ?
-    `,
-            [
-              first.check_in,
-              first.check_out,
-              first.check_in,
-              first.check_out,
-              checkInOutJson,
-              crawlingInfoJson,
-              otaSchedule.length > 0 ? 1 : 0,
-              String(room.id),
-            ],
-          );
-        } else {
-          await conn.query(
-            `
-    UPDATE room
-    SET
-      is_active = 0,
-      available = 0,
-      disable_start = ?,
-      disable_end = ?,
-      check_in = ?,
-      check_out = ?,
-      check_in_and_out = ?,
-      naver_crawling_info = ?,
-      is_ota = ?
-    WHERE id = ?
-    `,
-            [
-              first.check_in,
-              first.check_out,
-              first.check_in,
-              first.check_out,
-              checkInOutJson,
-              crawlingInfoJson,
-              otaSchedule.length > 0 ? 1 : 0,
-              room.id,
-            ],
-          );
-        }
 
         // =====================================================
         // history
@@ -6433,6 +6415,7 @@ export const syncNaverBookingsToRooms = async () => {
   SELECT id, booking_id, canceled
 FROM room_booking_history
 WHERE source = ?
+AND booking_id = ?
   AND room_id = ?
   AND room_group_id = ?
   AND check_in = ?
@@ -6442,12 +6425,13 @@ WHERE source = ?
   AND qty = ?
   AND price = ?
   AND product_name <=> ?
-  AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date')) = ?
+ 
 LIMIT 1
   `,
             [
               s.source,
-              historyRoomId,
+              bookingId,
+              room.id,
               groupId,
               s.check_in,
               s.check_out,
@@ -6456,7 +6440,6 @@ LIMIT 1
               s.qty,
               s.price,
               s.product_name || null,
-              s.payment_date || null,
             ],
           );
 
@@ -6470,7 +6453,7 @@ SET
   room_group_id = ?
 WHERE id = ?
     `,
-              [JSON.stringify(payload), historyRoomId, groupId, exists[0].id],
+              [JSON.stringify(payload), room.id, groupId, exists[0].id],
             );
           } else {
             await conn.query(
@@ -6497,7 +6480,7 @@ WHERE id = ?
                 bookingId,
                 s.check_in,
                 s.check_out,
-                historyRoomId,
+                room.id,
                 groupId,
                 s.source,
                 s.name,
@@ -6519,6 +6502,8 @@ WHERE id = ?
     ON h1.id > h2.id
    AND h1.source = h2.source
    AND h1.booking_id = h2.booking_id
+   AND h1.room_id = h2.room_id
+   AND h1.room_group_id = h2.room_group_id
    AND h1.check_in = h2.check_in
    AND h1.check_out = h2.check_out
    AND h1.guest_name = h2.guest_name
