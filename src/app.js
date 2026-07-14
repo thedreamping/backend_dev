@@ -5919,7 +5919,6 @@ export const syncNaverBookingsToRooms = async () => {
         buyer_name,
         buyer_tel,
         total_amount,
-        created_at AS payment_date,
         check_in,
         check_out,
         options,
@@ -6087,7 +6086,6 @@ export const syncNaverBookingsToRooms = async () => {
         if (Number(r.room_group_id) !== Number(groupId)) continue;
 
         allPeriods.push({
-          payment_date: r.payment_date,
           product_name: groupNameMap.get(r.room_group_id),
           source: "website",
           reservation_id: r.id,
@@ -6149,24 +6147,6 @@ export const syncNaverBookingsToRooms = async () => {
       }
 
       const dedupedPeriods = [...naturalMap.values()];
-
-      dedupedPeriods.sort((a, b) => {
-        const checkInCompare = a.check_in.localeCompare(b.check_in);
-        if (checkInCompare !== 0) return checkInCompare;
-
-        const checkOutCompare = a.check_out.localeCompare(b.check_out);
-        if (checkOutCompare !== 0) return checkOutCompare;
-
-        const paymentA = String(a.payment_date || "");
-        const paymentB = String(b.payment_date || "");
-
-        const paymentCompare = paymentA.localeCompare(paymentB);
-        if (paymentCompare !== 0) return paymentCompare;
-
-        return String(a.booking_id || "").localeCompare(
-          String(b.booking_id || ""),
-        );
-      });
       for (const period of dedupedPeriods) {
         const start = period.check_in;
         const end = period.check_out;
@@ -6249,70 +6229,6 @@ export const syncNaverBookingsToRooms = async () => {
       // =====================================================
       // 5-3. 저장
       // =====================================================
-
-      const assignedRoomMap = new Map();
-
-      for (const room of rooms) {
-        const schedule = roomSchedules.get(room.id) || [];
-        const otaSchedule = schedule.filter((s) => !s.is_manual_block);
-
-        for (const s of otaSchedule) {
-          const bookingId =
-            s.source === "website"
-              ? `SITE_${s.reservation_id}`
-              : String(s.booking_id);
-
-          const assignmentKey = [
-            s.source,
-            bookingId,
-            groupId,
-            s.check_in,
-            s.check_out,
-          ].join("|");
-
-          if (!assignedRoomMap.has(assignmentKey)) {
-            assignedRoomMap.set(assignmentKey, {
-              source: s.source,
-              bookingId,
-              groupId,
-              checkIn: s.check_in,
-              checkOut: s.check_out,
-              roomIds: new Set(),
-            });
-          }
-
-          assignedRoomMap.get(assignmentKey).roomIds.add(String(room.id));
-        }
-      }
-
-      for (const assignment of assignedRoomMap.values()) {
-        const currentRoomIds = [...assignment.roomIds];
-
-        if (!currentRoomIds.length) continue;
-
-        const placeholders = currentRoomIds.map(() => "?").join(", ");
-
-        await conn.query(
-          `
-    DELETE FROM room_booking_history
-    WHERE source = ?
-      AND booking_id = ?
-      AND room_group_id = ?
-      AND check_in = ?
-      AND check_out = ?
-      AND canceled = 0
-      AND CAST(room_id AS CHAR) NOT IN (${placeholders})
-    `,
-          [
-            assignment.source,
-            assignment.bookingId,
-            assignment.groupId,
-            assignment.checkIn,
-            assignment.checkOut,
-            ...currentRoomIds,
-          ],
-        );
-      }
       for (const room of rooms) {
         // const schedule = roomSchedules.get(room.id);
         // if (!schedule.length) continue;
@@ -6415,7 +6331,6 @@ export const syncNaverBookingsToRooms = async () => {
   SELECT id, booking_id, canceled
 FROM room_booking_history
 WHERE source = ?
-AND booking_id = ?
   AND room_id = ?
   AND room_group_id = ?
   AND check_in = ?
@@ -6425,12 +6340,11 @@ AND booking_id = ?
   AND qty = ?
   AND price = ?
   AND product_name <=> ?
- 
+  AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date')) = ?
 LIMIT 1
   `,
             [
               s.source,
-              bookingId,
               room.id,
               groupId,
               s.check_in,
@@ -6440,6 +6354,7 @@ LIMIT 1
               s.qty,
               s.price,
               s.product_name || null,
+              s.payment_date || null, // 추가
             ],
           );
 
@@ -6502,8 +6417,6 @@ WHERE id = ?
     ON h1.id > h2.id
    AND h1.source = h2.source
    AND h1.booking_id = h2.booking_id
-   AND h1.room_id = h2.room_id
-   AND h1.room_group_id = h2.room_group_id
    AND h1.check_in = h2.check_in
    AND h1.check_out = h2.check_out
    AND h1.guest_name = h2.guest_name
