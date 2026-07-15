@@ -2507,7 +2507,7 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
     if (isExtra) {
       await conn.query(
         `
-    UPDATE room_extra
+    UPDATE extra_room
     SET
       check_in_and_out_soogie = ?,
       is_soogie = 1,
@@ -2586,7 +2586,7 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
     if (isExtra) {
       await conn.query(
         `
-        UPDATE room_extra
+        UPDATE extra_room
         SET check_in_and_out_soogie = ?
         WHERE extra_id = ?
         `,
@@ -3798,7 +3798,7 @@ app.post("/api/payment/innopay/approve", async (req, res) => {
     const [extraRooms] = await conn.query(
       `
   SELECT *
-  FROM room_extra
+  FROM extra_room
   WHERE room_group_id=?
     AND start_date <= ?
     AND end_date >= ?
@@ -3845,7 +3845,7 @@ app.post("/api/payment/innopay/approve", async (req, res) => {
     if (assignedRoomType === "extra") {
       await conn.query(
         `
-    UPDATE room_extra
+    UPDATE extra_room
     SET
       check_in=?,
       check_out=?,
@@ -6072,7 +6072,7 @@ export const syncNaverBookingsToRooms = async () => {
     `);
 
     await conn.query(`
-  UPDATE room_extra
+  UPDATE extra_room
   SET
     is_active = 1,
     available = 1,
@@ -6181,7 +6181,7 @@ export const syncNaverBookingsToRooms = async () => {
     start_date,
     end_date,
     check_in_and_out_soogie
-  FROM room_extra
+  FROM extra_room
   WHERE room_group_id = ?
   ORDER BY id ASC
   `,
@@ -6477,7 +6477,7 @@ export const syncNaverBookingsToRooms = async () => {
         if (room.room_type === "extra") {
           await conn.query(
             `
-      UPDATE room_extra
+      UPDATE extra_room
       SET
         is_active = 0,
         available = 0,
