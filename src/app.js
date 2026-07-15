@@ -2720,6 +2720,7 @@ app.delete("/api/extra-room/:extraId", async (req, res) => {
     });
   } finally {
     if (conn) conn.release();
+    syncNaverBookingsToRooms();
   }
 });
 
