@@ -6053,6 +6053,61 @@ export const syncNaverBookingsToRooms = async () => {
     `);
 
     // =====================================================
+    // 3-1. 기존 OTA 객실 배정 백업
+    // reset 전에 반드시 실행해야 한다.
+    // =====================================================
+    const [previousNormalRooms] = await conn.query(`
+  SELECT
+    CAST(id AS CHAR) AS room_key,
+    naver_crawling_info
+  FROM room
+`);
+
+    const [previousExtraRooms] = await conn.query(`
+  SELECT
+    extra_id AS room_key,
+    naver_crawling_info
+  FROM extra_room
+`);
+
+    const makeAssignmentKey = (item) => {
+      const isWebsite =
+        item.source === "website" ||
+        item.reservation_id != null ||
+        String(item.booking_id || "").startsWith("SITE_");
+
+      if (isWebsite) {
+        const reservationId =
+          item.reservation_id ||
+          String(item.booking_id || "").replace(/^SITE_/, "");
+
+        return `website|SITE_${reservationId}`;
+      }
+
+      return `naver|${String(item.booking_id || "")}`;
+    };
+
+    /*
+     * 예약 한 건이 qty 2 이상이면 여러 객실에 들어갈 수 있으므로
+     * key -> roomKey 배열 형태로 저장한다.
+     */
+    const previousRoomMap = new Map();
+
+    for (const room of [...previousNormalRooms, ...previousExtraRooms]) {
+      const previousItems = safeParse(room.naver_crawling_info);
+
+      for (const item of previousItems) {
+        if (!item?.booking_id && !item?.reservation_id) continue;
+
+        const key = makeAssignmentKey(item);
+        const previousRoomKeys = previousRoomMap.get(key) || [];
+
+        previousRoomKeys.push(String(room.room_key));
+        previousRoomMap.set(key, previousRoomKeys);
+      }
+    }
+
+    // =====================================================
     // 4. reset
     // =====================================================
     await conn.query(`UPDATE room_group SET check_in_and_out = JSON_ARRAY()`);
@@ -6200,7 +6255,7 @@ export const syncNaverBookingsToRooms = async () => {
       const rooms = [
         ...normalRooms.map((room) => ({
           ...room,
-          room_key: room.id,
+          room_key: String(room.id),
           room_type: "normal",
           start_date: null,
           end_date: null,
@@ -6208,7 +6263,7 @@ export const syncNaverBookingsToRooms = async () => {
 
         ...extraRooms.map((room) => ({
           ...room,
-          room_key: room.extra_id,
+          room_key: String(room.extra_id),
           room_type: "extra",
           start_date: toKSTDate(room.start_date),
           end_date: toKSTDate(room.end_date),
@@ -6326,7 +6381,62 @@ export const syncNaverBookingsToRooms = async () => {
         naturalMap.set(key, period);
       }
 
-      const dedupedPeriods = [...naturalMap.values()];
+      const dedupedPeriods = [...naturalMap.values()].sort((a, b) => {
+        const aHasPrevious = previousRoomMap.has(makeAssignmentKey(a));
+        const bHasPrevious = previousRoomMap.has(makeAssignmentKey(b));
+
+        // 기존 객실 배정이 있는 예약을 먼저 처리
+        if (aHasPrevious !== bHasPrevious) {
+          return aHasPrevious ? -1 : 1;
+        }
+
+        // 같은 조건이면 체크인 날짜순
+        return String(a.check_in).localeCompare(String(b.check_in));
+      });
+
+      const hasStrictOverlap = (schedule, start, end, isDayUse) => {
+        return schedule.some((existing) => {
+          const existingIsDayUse = existing.check_in === existing.check_out;
+
+          if (existingIsDayUse && !isDayUse) {
+            return existing.check_in >= start && existing.check_in < end;
+          }
+
+          if (!existingIsDayUse && isDayUse) {
+            return start >= existing.check_in && start < existing.check_out;
+          }
+
+          if (existingIsDayUse && isDayUse) {
+            return existing.check_in === start;
+          }
+
+          return start <= existing.check_out && existing.check_in <= end;
+        });
+      };
+
+      const hasRelaxedOverlap = (schedule, start, end, isDayUse) => {
+        return schedule.some((existing) => {
+          const existingIsDayUse = existing.check_in === existing.check_out;
+
+          // 기존 예약이 데이유즈, 새 예약이 숙박
+          if (existingIsDayUse && !isDayUse) {
+            return existing.check_in >= start && existing.check_in < end;
+          }
+
+          // 기존 예약이 숙박, 새 예약이 데이유즈
+          if (!existingIsDayUse && isDayUse) {
+            return start >= existing.check_in && start < existing.check_out;
+          }
+
+          // 데이유즈끼리
+          if (existingIsDayUse && isDayUse) {
+            return existing.check_in === start;
+          }
+
+          // 숙박끼리는 체크아웃일과 다음 체크인을 겹침으로 보지 않는다.
+          return start < existing.check_out && existing.check_in < end;
+        });
+      };
 
       for (const period of dedupedPeriods) {
         const start = period.check_in;
@@ -6334,12 +6444,6 @@ export const syncNaverBookingsToRooms = async () => {
         const qty = Number(period.qty) || 1;
         const isDayUse = start === end;
 
-        /*
-         * 임시 객실은 예약 기간 전체가 임시 객실 운영기간 안에
-         * 들어오는 경우에만 배정 후보로 사용한다.
-         *
-         * 일반 객실은 항상 후보이며 배열 앞쪽에 있으므로 먼저 배정된다.
-         */
         const availableRoomsForPeriod = rooms.filter((room) => {
           if (room.room_type === "normal") {
             return true;
@@ -6348,74 +6452,71 @@ export const syncNaverBookingsToRooms = async () => {
           return room.start_date <= start && room.end_date >= end;
         });
 
+        const assignmentKey = makeAssignmentKey(period);
+        const previousRoomKeys = previousRoomMap.get(assignmentKey) || [];
+
         for (let q = 0; q < qty; q++) {
           let assigned = false;
 
           // =====================================================
-          // 1차 배정: 기존의 엄격한 겹침 판단
+          // 0차 배정: 기존에 사용하던 객실 유지
           // =====================================================
-          for (const room of availableRoomsForPeriod) {
-            const schedule = roomSchedules.get(room.room_key) || [];
+          const previousRoomKey = previousRoomKeys[q];
 
-            const strictOverlap = schedule.some((existing) => {
-              const existingIsDayUse = existing.check_in === existing.check_out;
+          if (previousRoomKey) {
+            const previousRoom = availableRoomsForPeriod.find(
+              (room) => String(room.room_key) === String(previousRoomKey),
+            );
 
-              if (existingIsDayUse && !isDayUse) {
-                return existing.check_in >= start && existing.check_in < end;
+            if (previousRoom) {
+              const schedule = roomSchedules.get(previousRoom.room_key) || [];
+
+              /*
+               * 기존 객실 유지 시에는 바톤터치가 허용된 최종 겹침 규칙을
+               * 사용한다. 그래야 체크아웃/체크인 연결 때문에 다른 방으로
+               * 이동하지 않는다.
+               */
+              const overlap = hasRelaxedOverlap(schedule, start, end, isDayUse);
+
+              if (!overlap) {
+                schedule.push(period);
+                roomSchedules.set(previousRoom.room_key, schedule);
+                assigned = true;
+
+                console.log(
+                  "🟢 기존 객실 유지:",
+                  period.booking_id || period.reservation_id,
+                  "=>",
+                  previousRoom.room_key,
+                );
               }
-
-              if (!existingIsDayUse && isDayUse) {
-                return start >= existing.check_in && start < existing.check_out;
-              }
-
-              if (existingIsDayUse && isDayUse) {
-                return existing.check_in === start;
-              }
-
-              return start <= existing.check_out && existing.check_in <= end;
-            });
-
-            if (!strictOverlap) {
-              schedule.push(period);
-              roomSchedules.set(room.room_key, schedule);
-              assigned = true;
-              break;
             }
           }
 
           // =====================================================
-          // 2차 배정: 기존 바톤터치 허용
+          // 1차 배정: 기존의 엄격한 겹침 판단
           // =====================================================
           if (!assigned) {
             for (const room of availableRoomsForPeriod) {
               const schedule = roomSchedules.get(room.room_key) || [];
 
-              const relaxedOverlap = schedule.some((existing) => {
-                const existingIsDayUse =
-                  existing.check_in === existing.check_out;
+              if (!hasStrictOverlap(schedule, start, end, isDayUse)) {
+                schedule.push(period);
+                roomSchedules.set(room.room_key, schedule);
+                assigned = true;
+                break;
+              }
+            }
+          }
 
-                // 기존 예약이 데이유즈, 새 예약이 숙박
-                if (existingIsDayUse && !isDayUse) {
-                  return existing.check_in >= start && existing.check_in < end;
-                }
+          // =====================================================
+          // 2차 배정: 바톤터치 허용
+          // =====================================================
+          if (!assigned) {
+            for (const room of availableRoomsForPeriod) {
+              const schedule = roomSchedules.get(room.room_key) || [];
 
-                // 기존 예약이 숙박, 새 예약이 데이유즈
-                if (!existingIsDayUse && isDayUse) {
-                  return (
-                    start >= existing.check_in && start < existing.check_out
-                  );
-                }
-
-                // 데이유즈끼리
-                if (existingIsDayUse && isDayUse) {
-                  return existing.check_in === start;
-                }
-
-                // 숙박끼리 체크아웃/체크인 바톤터치 허용
-                return start < existing.check_out && existing.check_in < end;
-              });
-
-              if (!relaxedOverlap) {
+              if (!hasRelaxedOverlap(schedule, start, end, isDayUse)) {
                 schedule.push(period);
                 roomSchedules.set(room.room_key, schedule);
                 assigned = true;
@@ -6425,7 +6526,11 @@ export const syncNaverBookingsToRooms = async () => {
           }
 
           if (!assigned) {
-            console.warn("[FAIL]", period.booking_id || period.reservation_id);
+            console.warn(
+              "[FAIL]",
+              period.booking_id || period.reservation_id,
+              `qty index: ${q}`,
+            );
           }
         }
       }
