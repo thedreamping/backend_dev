@@ -5422,7 +5422,7 @@ app.get("/api/reservation_history", async (req, res) => {
       OR source = 'website'
       OR source LIKE 'SITE_%'
       OR booking_id LIKE 'SITE_%'
-    THEN DATE_ADD(created_at, INTERVAL 9 HOUR)
+    THEN created_at
 
     ELSE DATE_ADD(
       STR_TO_DATE(
