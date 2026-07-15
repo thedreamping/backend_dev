@@ -2684,6 +2684,45 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
     conn.release();
   }
 });
+app.delete("/api/extra-room/:extraId", async (req, res) => {
+  let conn;
+
+  try {
+    conn = await pool.getConnection();
+
+    const { extraId } = req.params;
+
+    const [result] = await conn.query(
+      `
+      DELETE FROM extra_room
+      WHERE extra_id = ?
+      `,
+      [extraId],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "삭제할 임시 객실을 찾을 수 없습니다.",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "임시 객실이 삭제되었습니다.",
+    });
+  } catch (error) {
+    console.error("임시 객실 삭제 오류:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "임시 객실 삭제 중 오류가 발생했습니다.",
+    });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
 app.put("/api/rooms/bulk-update", verifyToken, async (req, res) => {
   const connection = await pool.getConnection();
 
