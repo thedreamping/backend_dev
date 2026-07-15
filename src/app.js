@@ -3795,14 +3795,41 @@ app.post("/api/payment/innopay/approve", async (req, res) => {
       [reservation.room_group_id],
     );
 
+    const [extraRooms] = await conn.query(
+      `
+  SELECT *
+  FROM room_extra
+  WHERE room_group_id=?
+    AND start_date <= ?
+    AND end_date >= ?
+  ORDER BY id ASC
+  `,
+      [reservation.room_group_id, reservation.check_in, reservation.check_out],
+    );
+
     let assignedRoomId = null;
+    let assignedRoomType = null;
 
     for (const room of rooms) {
       const schedules = getAllSchedules(room);
 
       if (!isOverlap(schedules, reservation.check_in, reservation.check_out)) {
         assignedRoomId = room.id;
+        assignedRoomType = "normal";
         break;
+      }
+    }
+    if (!assignedRoomId) {
+      for (const room of extraRooms) {
+        const schedules = getAllSchedules(room);
+
+        if (
+          !isOverlap(schedules, reservation.check_in, reservation.check_out)
+        ) {
+          assignedRoomId = room.extra_id;
+          assignedRoomType = "extra";
+          break;
+        }
       }
     }
 
@@ -3815,31 +3842,59 @@ app.post("/api/payment/innopay/approve", async (req, res) => {
       });
     }
 
-    await conn.query(
-      `
-      UPDATE room
-      SET
-        check_in=?,
-        check_out=?,
-        check_in_and_out=JSON_ARRAY_APPEND(
-          IFNULL(check_in_and_out, JSON_ARRAY()),
-          '$',
-          JSON_OBJECT(
-            'check_in', ?,
-            'check_out', ?,
-            'source', 'payment'
-          )
+    if (assignedRoomType === "extra") {
+      await conn.query(
+        `
+    UPDATE room_extra
+    SET
+      check_in=?,
+      check_out=?,
+      check_in_and_out=JSON_ARRAY_APPEND(
+        IFNULL(check_in_and_out, JSON_ARRAY()),
+        '$',
+        JSON_OBJECT(
+          'check_in', ?,
+          'check_out', ?,
+          'source', 'payment'
         )
-      WHERE id=?
-      `,
-      [
-        reservation.check_in,
-        reservation.check_out,
-        reservation.check_in,
-        reservation.check_out,
-        assignedRoomId,
-      ],
-    );
+      )
+    WHERE extra_id=?
+    `,
+        [
+          reservation.check_in,
+          reservation.check_out,
+          reservation.check_in,
+          reservation.check_out,
+          assignedRoomId,
+        ],
+      );
+    } else {
+      await conn.query(
+        `
+    UPDATE room
+    SET
+      check_in=?,
+      check_out=?,
+      check_in_and_out=JSON_ARRAY_APPEND(
+        IFNULL(check_in_and_out, JSON_ARRAY()),
+        '$',
+        JSON_OBJECT(
+          'check_in', ?,
+          'check_out', ?,
+          'source', 'payment'
+        )
+      )
+    WHERE id=?
+    `,
+        [
+          reservation.check_in,
+          reservation.check_out,
+          reservation.check_in,
+          reservation.check_out,
+          assignedRoomId,
+        ],
+      );
+    }
 
     await conn.query(
       `
@@ -6016,6 +6071,20 @@ export const syncNaverBookingsToRooms = async () => {
         is_ota = 0
     `);
 
+    await conn.query(`
+  UPDATE room_extra
+  SET
+    is_active = 1,
+    available = 1,
+    disable_start = NULL,
+    disable_end = NULL,
+    check_in = NULL,
+    check_out = NULL,
+    check_in_and_out = JSON_ARRAY(),
+    naver_crawling_info = JSON_ARRAY(),
+    is_ota = 0
+`);
+
     // =====================================================
     // 5. group loop
     // =====================================================
@@ -6092,9 +6161,11 @@ export const syncNaverBookingsToRooms = async () => {
       // const roomSchedules = new Map();
       // for (const r of rooms) roomSchedules.set(r.id, []);
 
-      const [rooms] = await conn.query(
+      const [normalRooms] = await conn.query(
         `
-  SELECT id, check_in_and_out_soogie
+  SELECT
+    id,
+    check_in_and_out_soogie
   FROM room
   WHERE room_group_id = ?
   ORDER BY id ASC
@@ -6102,20 +6173,62 @@ export const syncNaverBookingsToRooms = async () => {
         [groupId],
       );
 
+      const [extraRooms] = await conn.query(
+        `
+  SELECT
+    id,
+    extra_id,
+    start_date,
+    end_date,
+    check_in_and_out_soogie
+  FROM room_extra
+  WHERE room_group_id = ?
+  ORDER BY id ASC
+  `,
+        [groupId],
+      );
+
+      /*
+       * normalRooms와 extraRooms를 같은 형식으로 맞춘다.
+       *
+       * 일반 객실:
+       * room_key = 기존 숫자 ID
+       *
+       * 임시 객실:
+       * room_key = EXTRA_... 문자열
+       */
+      const rooms = [
+        ...normalRooms.map((room) => ({
+          ...room,
+          room_key: room.id,
+          room_type: "normal",
+          start_date: null,
+          end_date: null,
+        })),
+
+        ...extraRooms.map((room) => ({
+          ...room,
+          room_key: room.extra_id,
+          room_type: "extra",
+          start_date: toKSTDate(room.start_date),
+          end_date: toKSTDate(room.end_date),
+        })),
+      ];
+
       const roomSchedules = new Map();
 
-      for (const r of rooms) {
-        const manualSchedules = safeParse(r.check_in_and_out_soogie)
-          .filter((s) => s.check_in && s.check_out)
-          .map((s) => ({
-            ...s,
+      for (const room of rooms) {
+        const manualSchedules = safeParse(room.check_in_and_out_soogie)
+          .filter((schedule) => schedule.check_in && schedule.check_out)
+          .map((schedule) => ({
+            ...schedule,
             source: "manual",
-            check_in: toKSTDate(s.check_in),
-            check_out: toKSTDate(s.check_out),
+            check_in: toKSTDate(schedule.check_in),
+            check_out: toKSTDate(schedule.check_out),
             is_manual_block: true,
           }));
 
-        roomSchedules.set(r.id, manualSchedules);
+        roomSchedules.set(room.room_key, manualSchedules);
       }
 
       // =====================================================
@@ -6214,73 +6327,97 @@ export const syncNaverBookingsToRooms = async () => {
       }
 
       const dedupedPeriods = [...naturalMap.values()];
+
       for (const period of dedupedPeriods) {
         const start = period.check_in;
         const end = period.check_out;
-
         const qty = Number(period.qty) || 1;
+        const isDayUse = start === end;
+
+        /*
+         * 임시 객실은 예약 기간 전체가 임시 객실 운영기간 안에
+         * 들어오는 경우에만 배정 후보로 사용한다.
+         *
+         * 일반 객실은 항상 후보이며 배열 앞쪽에 있으므로 먼저 배정된다.
+         */
+        const availableRoomsForPeriod = rooms.filter((room) => {
+          if (room.room_type === "normal") {
+            return true;
+          }
+
+          return room.start_date <= start && room.end_date >= end;
+        });
 
         for (let q = 0; q < qty; q++) {
           let assigned = false;
 
-          // 1차 배정
-          for (const room of rooms) {
-            const schedule = roomSchedules.get(room.id);
+          // =====================================================
+          // 1차 배정: 기존의 엄격한 겹침 판단
+          // =====================================================
+          for (const room of availableRoomsForPeriod) {
+            const schedule = roomSchedules.get(room.room_key) || [];
 
-            const strictOverlap = schedule.some((s) => {
-              const existingIsDayUse = s.check_in === s.check_out;
-              const currentIsDayUse = start === end;
+            const strictOverlap = schedule.some((existing) => {
+              const existingIsDayUse = existing.check_in === existing.check_out;
 
-              if (existingIsDayUse && !currentIsDayUse) {
-                return s.check_in >= start && s.check_in < end;
+              if (existingIsDayUse && !isDayUse) {
+                return existing.check_in >= start && existing.check_in < end;
               }
 
-              if (!existingIsDayUse && currentIsDayUse) {
-                return start >= s.check_in && start < s.check_out;
+              if (!existingIsDayUse && isDayUse) {
+                return start >= existing.check_in && start < existing.check_out;
               }
 
-              if (existingIsDayUse && currentIsDayUse) {
-                return s.check_in === start;
+              if (existingIsDayUse && isDayUse) {
+                return existing.check_in === start;
               }
 
-              return start <= s.check_out && s.check_in <= end;
+              return start <= existing.check_out && existing.check_in <= end;
             });
 
             if (!strictOverlap) {
               schedule.push(period);
+              roomSchedules.set(room.room_key, schedule);
               assigned = true;
               break;
             }
           }
-          const isDayUse = start === end;
-          // 2차 바톤터치
-          if (!assigned) {
-            for (const room of rooms) {
-              const schedule = roomSchedules.get(room.id);
 
-              const relaxedOverlap = schedule.some((s) => {
-                const existingIsDayUse = s.check_in === s.check_out;
+          // =====================================================
+          // 2차 배정: 기존 바톤터치 허용
+          // =====================================================
+          if (!assigned) {
+            for (const room of availableRoomsForPeriod) {
+              const schedule = roomSchedules.get(room.room_key) || [];
+
+              const relaxedOverlap = schedule.some((existing) => {
+                const existingIsDayUse =
+                  existing.check_in === existing.check_out;
 
                 // 기존 예약이 데이유즈, 새 예약이 숙박
                 if (existingIsDayUse && !isDayUse) {
-                  return s.check_in >= start && s.check_in < end;
+                  return existing.check_in >= start && existing.check_in < end;
                 }
 
                 // 기존 예약이 숙박, 새 예약이 데이유즈
                 if (!existingIsDayUse && isDayUse) {
-                  return start >= s.check_in && start < s.check_out;
+                  return (
+                    start >= existing.check_in && start < existing.check_out
+                  );
                 }
 
                 // 데이유즈끼리
                 if (existingIsDayUse && isDayUse) {
-                  return s.check_in === start;
+                  return existing.check_in === start;
                 }
 
-                // 숙박끼리: 체크아웃/체크인 바톤터치 허용
-                return start < s.check_out && s.check_in < end;
+                // 숙박끼리 체크아웃/체크인 바톤터치 허용
+                return start < existing.check_out && existing.check_in < end;
               });
+
               if (!relaxedOverlap) {
                 schedule.push(period);
+                roomSchedules.set(room.room_key, schedule);
                 assigned = true;
                 break;
               }
@@ -6294,182 +6431,215 @@ export const syncNaverBookingsToRooms = async () => {
       }
 
       // =====================================================
-      // 5-3. 저장
+      // 5-3. 일반 객실 + 임시 객실 저장
       // =====================================================
       for (const room of rooms) {
-        // const schedule = roomSchedules.get(room.id);
-        // if (!schedule.length) continue;
+        const roomKey = room.room_key;
+        const schedule = roomSchedules.get(roomKey) || [];
 
-        // schedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
+        const otaSchedule = schedule.filter((item) => !item.is_manual_block);
 
-        // const first = schedule[0];
-
-        // const schedule = roomSchedules.get(room.id);
-        // const otaSchedule = schedule.filter((s) => !s.is_manual_block);
-
-        // if (!otaSchedule.length) continue;
-
-        // otaSchedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
-
-        // const first = otaSchedule[0];
-        const schedule = roomSchedules.get(room.id);
-        const otaSchedule = schedule.filter((s) => !s.is_manual_block);
-
-        if (!schedule.length) continue;
+        if (!schedule.length) {
+          continue;
+        }
 
         schedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
+
         otaSchedule.sort((a, b) => a.check_in.localeCompare(b.check_in));
 
         const first = schedule[0];
 
-        await conn.query(
-          `
-          UPDATE room
-          SET
-            is_active = 0,
-            available = 0,
-            disable_start = ?,
-            disable_end = ?,
-            check_in = ?,
-            check_out = ?,
-            check_in_and_out = ?,
-            naver_crawling_info = ?
-          WHERE id = ?
-        `,
-          [
-            first.check_in,
-            first.check_out,
-            first.check_in,
-            first.check_out,
-            JSON.stringify(
-              otaSchedule.map((s) => ({
-                check_in: s.check_in,
-                check_out: s.check_out,
-                source: s.source,
-              })),
-            ),
-            JSON.stringify(
-              otaSchedule.map((s) => ({
-                booking_id: s.booking_id,
-                reservation_id: s.reservation_id,
-                product_name: s.product_name,
-                payment_date: s.payment_date || null,
-                name: s.name,
-                phone: s.phone,
-                price: s.price,
-                qty: s.qty,
-                booking_option: s.booking_option,
-                request_memo: s.request_memo,
-                check_in: s.check_in,
-                check_out: s.check_out,
-              })),
-            ),
-
-            room.id,
-          ],
+        const scheduleJson = JSON.stringify(
+          otaSchedule.map((item) => ({
+            check_in: item.check_in,
+            check_out: item.check_out,
+            source: item.source,
+          })),
         );
+
+        const crawlingInfoJson = JSON.stringify(
+          otaSchedule.map((item) => ({
+            booking_id: item.booking_id,
+            reservation_id: item.reservation_id,
+            product_name: item.product_name,
+            payment_date: item.payment_date || null,
+            name: item.name,
+            phone: item.phone,
+            price: item.price,
+            qty: item.qty,
+            booking_option: item.booking_option,
+            request_memo: item.request_memo,
+            check_in: item.check_in,
+            check_out: item.check_out,
+          })),
+        );
+
+        if (room.room_type === "extra") {
+          await conn.query(
+            `
+      UPDATE room_extra
+      SET
+        is_active = 0,
+        available = 0,
+        disable_start = ?,
+        disable_end = ?,
+        check_in = ?,
+        check_out = ?,
+        check_in_and_out = ?,
+        naver_crawling_info = ?
+      WHERE extra_id = ?
+      `,
+            [
+              first.check_in,
+              first.check_out,
+              first.check_in,
+              first.check_out,
+              scheduleJson,
+              crawlingInfoJson,
+              roomKey,
+            ],
+          );
+        } else {
+          await conn.query(
+            `
+      UPDATE room
+      SET
+        is_active = 0,
+        available = 0,
+        disable_start = ?,
+        disable_end = ?,
+        check_in = ?,
+        check_out = ?,
+        check_in_and_out = ?,
+        naver_crawling_info = ?
+      WHERE id = ?
+      `,
+            [
+              first.check_in,
+              first.check_out,
+              first.check_in,
+              first.check_out,
+              scheduleJson,
+              crawlingInfoJson,
+              roomKey,
+            ],
+          );
+        }
 
         // =====================================================
         // history
         // =====================================================
-        for (const s of otaSchedule) {
+        for (const item of otaSchedule) {
           const bookingId =
-            s.source === "website"
-              ? `SITE_${s.reservation_id}`
-              : String(s.booking_id);
+            item.source === "website"
+              ? `SITE_${item.reservation_id}`
+              : String(item.booking_id);
 
           const payload = {
             booking_id: bookingId,
-            reservation_id: s.reservation_id || null,
-            product_name: s.product_name,
-            payment_date: s.payment_date || null,
-            name: s.name,
-            phone: s.phone,
-            price: s.price,
-            qty: s.qty,
-            booking_option: s.booking_option,
-            request_memo: s.request_memo,
-            check_in: s.check_in,
-            check_out: s.check_out,
+            reservation_id: item.reservation_id || null,
+            product_name: item.product_name,
+            payment_date: item.payment_date || null,
+            name: item.name,
+            phone: item.phone,
+            price: item.price,
+            qty: item.qty,
+            booking_option: item.booking_option,
+            request_memo: item.request_memo,
+            check_in: item.check_in,
+            check_out: item.check_out,
           };
 
           const [exists] = await conn.query(
             `
-  SELECT id, booking_id, canceled
-FROM room_booking_history
-WHERE source = ?
-  AND room_id = ?
-  AND room_group_id = ?
-  AND check_in = ?
-  AND check_out = ?
-  AND guest_name = ?
-  AND guest_phone = ?
-  AND qty = ?
-  AND price = ?
-  AND product_name <=> ?
-  AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date')) = ?
-LIMIT 1
-  `,
+      SELECT
+        id,
+        booking_id,
+        canceled
+      FROM room_booking_history
+      WHERE source = ?
+        AND room_id = ?
+        AND room_group_id = ?
+        AND check_in = ?
+        AND check_out = ?
+        AND guest_name = ?
+        AND guest_phone = ?
+        AND qty = ?
+        AND price = ?
+        AND product_name <=> ?
+        AND JSON_UNQUOTE(
+          JSON_EXTRACT(payload, '$.payment_date')
+        ) = ?
+      LIMIT 1
+      `,
             [
-              s.source,
-              room.id,
+              item.source,
+              String(roomKey),
               groupId,
-              s.check_in,
-              s.check_out,
-              s.name,
-              s.phone,
-              s.qty,
-              s.price,
-              s.product_name || null,
-              s.payment_date || null, // 추가
+              item.check_in,
+              item.check_out,
+              item.name,
+              item.phone,
+              item.qty,
+              item.price,
+              item.product_name || null,
+              item.payment_date || null,
             ],
           );
 
           if (exists.length) {
             await conn.query(
               `
-    UPDATE room_booking_history
-SET
-  payload = ?,
-  room_id = ?,
-  room_group_id = ?
-WHERE id = ?
-    `,
-              [JSON.stringify(payload), room.id, groupId, exists[0].id],
+        UPDATE room_booking_history
+        SET
+          payload = ?,
+          booking_id = ?,
+          room_id = ?,
+          room_group_id = ?,
+          canceled = 0
+        WHERE id = ?
+        `,
+              [
+                JSON.stringify(payload),
+                bookingId,
+                String(roomKey),
+                groupId,
+                exists[0].id,
+              ],
             );
           } else {
             await conn.query(
               `
-    INSERT INTO room_booking_history (
-      payload,
-      booking_id,
-      check_in,
-      check_out,
-      room_id,
-      room_group_id,
-      source,
-      guest_name,
-      guest_phone,
-      qty,
-      price,
-      product_name,
-      canceled
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-    `,
+        INSERT INTO room_booking_history (
+          payload,
+          booking_id,
+          check_in,
+          check_out,
+          room_id,
+          room_group_id,
+          source,
+          guest_name,
+          guest_phone,
+          qty,
+          price,
+          product_name,
+          canceled
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        `,
               [
                 JSON.stringify(payload),
                 bookingId,
-                s.check_in,
-                s.check_out,
-                room.id,
+                item.check_in,
+                item.check_out,
+                String(roomKey),
                 groupId,
-                s.source,
-                s.name,
-                s.phone,
-                s.qty,
-                s.price,
-                s.product_name || null,
+                item.source,
+                item.name,
+                item.phone,
+                item.qty,
+                item.price,
+                item.product_name || null,
               ],
             );
           }
