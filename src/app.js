@@ -2257,10 +2257,14 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         : reason?.trim() || null;
 
     // =====================================================
-    // 그룹 전체 인원 및 day_use 갱신
+    // 그룹 전체 숙박 인원 및 day_use 갱신
     //
-    // 기존 room 룰 유지
-    // extra이면 extra_room 그룹 내에서 갱신
+    // 기존 룰 유지:
+    // - 일반 객실은 같은 room_group_id의 일반 객실 전체
+    // - 임시 객실은 같은 room_group_id의 임시 객실 전체
+    //
+    // 데이유즈 최소/최대 인원은 여기에서 일괄 적용하지 않고
+    // 아래 개별 객실 수정 쿼리에서만 처리
     // =====================================================
     if (isExtra) {
       await conn.query(
@@ -2269,21 +2273,11 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         SET
           capacity_max = ?,
           capacity_min = ?,
-          capacity_max_dayuse = ?,
-          capacity_min_dayuse = ?,
           day_use = ?,
           lodgement = ?
         WHERE room_group_id = ?
         `,
-        [
-          numericMax,
-          numericMin,
-          numericMaxDayuse,
-          numericMinDayuse,
-          finalDayUse,
-          lodgement,
-          roomGroupId,
-        ],
+        [numericMax, numericMin, finalDayUse, lodgement, roomGroupId],
       );
     } else {
       await conn.query(
@@ -2292,26 +2286,19 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         SET
           capacity_max = ?,
           capacity_min = ?,
-          capacity_max_dayuse = ?,
-          capacity_min_dayuse = ?,
           day_use = ?,
           lodgement = ?
         WHERE room_group_id = ?
         `,
-        [
-          numericMax,
-          numericMin,
-          numericMaxDayuse,
-          numericMinDayuse,
-          finalDayUse,
-          lodgement,
-          roomGroupId,
-        ],
+        [numericMax, numericMin, finalDayUse, lodgement, roomGroupId],
       );
     }
 
     // =====================================================
     // 개별 객실 수정
+    //
+    // capacity_max_dayuse / capacity_min_dayuse는
+    // 선택한 객실 하나에만 적용
     // =====================================================
     if (isExtra) {
       await conn.query(
@@ -2323,6 +2310,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           reason = ?,
           start_date = ?,
           end_date = ?,
+          capacity_max_dayuse = ?,
+          capacity_min_dayuse = ?,
           disable_start = NULL,
           disable_end = NULL,
           check_in = NULL,
@@ -2339,6 +2328,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           finalReason,
           normalizeDate(start_date),
           normalizeDate(end_date),
+          numericMaxDayuse,
+          numericMinDayuse,
           finalSoogie,
           finalIsOta,
           JSON.stringify(finalSoogieSchedule),
@@ -2356,6 +2347,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           reason = ?,
           disable_start = ?,
           disable_end = ?,
+          capacity_max_dayuse = ?,
+          capacity_min_dayuse = ?,
           check_in = NULL,
           check_out = NULL,
           is_soogie = ?,
@@ -2373,6 +2366,9 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           Number(is_active) === 1 ? null : normalizeDate(disable_start) || null,
 
           Number(is_active) === 1 ? null : normalizeDate(disable_end) || null,
+
+          numericMaxDayuse,
+          numericMinDayuse,
 
           finalSoogie,
           finalIsOta,
