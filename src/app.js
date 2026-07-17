@@ -108,10 +108,13 @@ app.get("/api/room_group", async (req, res) => {
     });
   }
 });
+
 app.get("/api/rooms", async (req, res) => {
   try {
     const [rooms] = await pool.query(`
-      SELECT *, 0 AS is_extra
+      SELECT
+        *,
+        0 AS is_extra
       FROM room
     `);
 
@@ -120,14 +123,18 @@ app.get("/api/rooms", async (req, res) => {
         extra_id AS id,
         name,
         description,
+
+        capacity_min,
         capacity_max,
+        capacity_min_dayuse,
+        capacity_max_dayuse,
+
         created_at,
         room_group_id,
         available,
         is_active,
         day_use,
         lodgement,
-        capacity_min,
         reason,
         disable_start,
         disable_end,
@@ -142,6 +149,7 @@ app.get("/api/rooms", async (req, res) => {
         start_date,
         end_date,
         extra_id,
+
         1 AS is_extra
       FROM extra_room
     `);
@@ -152,7 +160,8 @@ app.get("/api/rooms", async (req, res) => {
     });
   } catch (e) {
     console.error("room fetch error:", e);
-    res.status(500).json({
+
+    return res.status(500).json({
       ok: false,
       message: "room 조회 중 오류 발생",
     });
@@ -1993,8 +2002,13 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       disable_end,
       start_date,
       end_date,
+
       capacity_max,
       capacity_min,
+
+      capacity_max_dayuse,
+      capacity_min_dayuse,
+
       day_use,
       manual_booking,
       cancel_booking,
@@ -2009,6 +2023,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       typeof is_active === "undefined" ||
       capacity_max === undefined ||
       capacity_min === undefined ||
+      capacity_max_dayuse === undefined ||
+      capacity_min_dayuse === undefined ||
       day_use === undefined
     ) {
       await conn.rollback();
@@ -2016,14 +2032,21 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       return res.status(400).json({
         ok: false,
         message:
-          "name, is_active, capacity_max, capacity_min, day_use는 필수입니다.",
+          "name, is_active, capacity_max, capacity_min, capacity_max_dayuse, capacity_min_dayuse, day_use는 필수입니다.",
       });
     }
 
     const numericMax = Number(capacity_max);
     const numericMin = Number(capacity_min);
+
+    const numericMaxDayuse = Number(capacity_max_dayuse);
+    const numericMinDayuse = Number(capacity_min_dayuse);
+
     const numericDayUse = Number(day_use);
 
+    // =====================================================
+    // 숙박 인원 검증
+    // =====================================================
     if (
       Number.isNaN(numericMax) ||
       Number.isNaN(numericMin) ||
@@ -2039,6 +2062,25 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       });
     }
 
+    // =====================================================
+    // 데이유즈 인원 검증
+    // =====================================================
+    if (
+      Number.isNaN(numericMaxDayuse) ||
+      Number.isNaN(numericMinDayuse) ||
+      numericMinDayuse < 0 ||
+      numericMaxDayuse < 0 ||
+      numericMaxDayuse < numericMinDayuse
+    ) {
+      await conn.rollback();
+
+      return res.status(400).json({
+        ok: false,
+        message: "데이유즈 capacity 값이 올바르지 않습니다.",
+      });
+    }
+
+    // 기존 day_use 검증 유지
     if (![0, 1, 2].includes(numericDayUse)) {
       await conn.rollback();
 
@@ -2048,7 +2090,9 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       });
     }
 
+    // =====================================================
     // 임시 객실 기간 검증
+    // =====================================================
     if (isExtra) {
       if (!start_date || !end_date) {
         await conn.rollback();
@@ -2071,6 +2115,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
 
     // =====================================================
     // day_use / lodgement 계산
+    // 기존 로직 그대로 유지
     // =====================================================
     let finalDayUse = 0;
     let lodgement = 0;
@@ -2213,6 +2258,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
 
     // =====================================================
     // 그룹 전체 인원 및 day_use 갱신
+    //
     // 기존 room 룰 유지
     // extra이면 extra_room 그룹 내에서 갱신
     // =====================================================
@@ -2223,11 +2269,21 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         SET
           capacity_max = ?,
           capacity_min = ?,
+          capacity_max_dayuse = ?,
+          capacity_min_dayuse = ?,
           day_use = ?,
           lodgement = ?
         WHERE room_group_id = ?
         `,
-        [numericMax, numericMin, finalDayUse, lodgement, roomGroupId],
+        [
+          numericMax,
+          numericMin,
+          numericMaxDayuse,
+          numericMinDayuse,
+          finalDayUse,
+          lodgement,
+          roomGroupId,
+        ],
       );
     } else {
       await conn.query(
@@ -2236,11 +2292,21 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         SET
           capacity_max = ?,
           capacity_min = ?,
+          capacity_max_dayuse = ?,
+          capacity_min_dayuse = ?,
           day_use = ?,
           lodgement = ?
         WHERE room_group_id = ?
         `,
-        [numericMax, numericMin, finalDayUse, lodgement, roomGroupId],
+        [
+          numericMax,
+          numericMin,
+          numericMaxDayuse,
+          numericMinDayuse,
+          finalDayUse,
+          lodgement,
+          roomGroupId,
+        ],
       );
     }
 
@@ -2303,8 +2369,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           finalIsActive,
           finalReason,
 
-          // 기존에는 무조건 NULL이었지만,
-          // 프론트가 값을 보낼 경우 정상 저장 가능
+          // 프론트가 비활성화 기간을 보낼 경우 저장
           Number(is_active) === 1 ? null : normalizeDate(disable_start) || null,
 
           Number(is_active) === 1 ? null : normalizeDate(disable_end) || null,
@@ -2339,6 +2404,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     conn.release();
   }
 });
+
 app.put("/api/room-group/:id", verifyToken, async (req, res) => {
   const connection = await pool.getConnection();
 
@@ -2502,37 +2568,32 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
       });
     }
 
-    let rows = [];
-
-    if (isExtra) {
-      await conn.query(
-        `
-    UPDATE extra_room
-    SET
-      check_in_and_out_soogie = ?,
-      is_soogie = 1,
-      is_active = 0,
-      is_ota = 0,
-      reason = '수기예약'
-    WHERE extra_id = ?
-    `,
-        [JSON.stringify(schedules), id],
-      );
-    } else {
-      await conn.query(
-        `
-    UPDATE room
-    SET
-      check_in_and_out_soogie = ?,
-      is_soogie = 1,
-      is_active = 0,
-      is_ota = 0,
-      reason = '수기예약'
-    WHERE id = ?
-    `,
-        [JSON.stringify(schedules), id],
-      );
-    }
+    // 1. 먼저 객실 정보와 기존 수기예약 목록을 조회한다.
+    const [rows] = isExtra
+      ? await conn.query(
+          `
+          SELECT
+            extra_id AS id,
+            room_group_id,
+            check_in_and_out_soogie
+          FROM extra_room
+          WHERE extra_id = ?
+          FOR UPDATE
+          `,
+          [id],
+        )
+      : await conn.query(
+          `
+          SELECT
+            id,
+            room_group_id,
+            check_in_and_out_soogie
+          FROM room
+          WHERE id = ?
+          FOR UPDATE
+          `,
+          [id],
+        );
 
     if (!rows.length) {
       await conn.rollback();
@@ -2543,7 +2604,8 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
       });
     }
 
-    let schedules = parseSchedule(rows[0].check_in_and_out_soogie);
+    // 2. 조회된 기존 수기예약 데이터를 배열로 변환한다.
+    const schedules = parseSchedule(rows[0].check_in_and_out_soogie);
 
     const newBooking = {
       source: "manual",
@@ -2560,11 +2622,12 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
       custom_name: manual_booking.custom_name || "",
     };
 
+    // 3. 같은 체크인/체크아웃의 수기예약 중복 여부 확인
     const duplicated = schedules.some((booking) => {
       return (
-        String(booking.source || "manual") === "manual" &&
-        String(booking.check_in).slice(0, 10) === newBooking.check_in &&
-        String(booking.check_out).slice(0, 10) === newBooking.check_out
+        String(booking?.source || "manual") === "manual" &&
+        String(booking?.check_in || "").slice(0, 10) === newBooking.check_in &&
+        String(booking?.check_out || "").slice(0, 10) === newBooking.check_out
       );
     });
 
@@ -2580,14 +2643,20 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
     schedules.push(newBooking);
 
     schedules.sort((a, b) =>
-      String(a.check_in).localeCompare(String(b.check_in)),
+      String(a?.check_in || "").localeCompare(String(b?.check_in || "")),
     );
 
+    // 4. 최종 schedules를 객실 테이블에 한 번만 저장한다.
     if (isExtra) {
       await conn.query(
         `
         UPDATE extra_room
-        SET check_in_and_out_soogie = ?
+        SET
+          check_in_and_out_soogie = ?,
+          is_soogie = 1,
+          is_active = 0,
+          is_ota = 0,
+          reason = '수기예약'
         WHERE extra_id = ?
         `,
         [JSON.stringify(schedules), id],
@@ -2608,6 +2677,7 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
       );
     }
 
+    // 5. 예약 히스토리 기록
     const manualBookingId =
       `MANUAL_${id}_${newBooking.check_in}_` +
       `${newBooking.check_out}_${Date.now()}`;
@@ -2657,7 +2727,7 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
         manualBookingId,
         newBooking.check_in,
         newBooking.check_out,
-        id,
+        String(id),
         rows[0].room_group_id,
         newBooking.custom_name || "",
         newBooking.memo || "",
@@ -2679,6 +2749,7 @@ app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
     return res.status(500).json({
       ok: false,
       message: "수기예약 추가 실패",
+      error: err.message,
     });
   } finally {
     conn.release();
@@ -2972,45 +3043,118 @@ app.post("/api/room-group", verifyToken, async (req, res) => {
     });
   }
 });
+
 app.post("/api/room", verifyToken, async (req, res) => {
   try {
     const {
       name,
       description,
       room_group_id,
-      capacity_max,
+
       capacity_min,
+      capacity_max,
+
+      capacity_min_dayuse,
+      capacity_max_dayuse,
+
       day_use,
     } = req.body;
 
     // =================================================
-    // 1️⃣ 필수값 체크
+    // 1. 필수값 체크
     // =================================================
     if (
-      !name ||
-      !room_group_id ||
-      capacity_max === undefined ||
+      !name?.trim() ||
+      room_group_id === undefined ||
+      room_group_id === null ||
+      room_group_id === "" ||
       capacity_min === undefined ||
+      capacity_max === undefined ||
+      capacity_min_dayuse === undefined ||
+      capacity_max_dayuse === undefined ||
       day_use === undefined
     ) {
       return res.status(400).json({
         ok: false,
         message:
-          "name, room_group_id, capacity_max, capacity_min, day_use는 필수입니다.",
+          "name, room_group_id, capacity_min, capacity_max, capacity_min_dayuse, capacity_max_dayuse, day_use는 필수입니다.",
       });
     }
 
-    const numericMax = Number(capacity_max);
+    const numericRoomGroupId = Number(room_group_id);
+
     const numericMin = Number(capacity_min);
+    const numericMax = Number(capacity_max);
+
+    const numericMinDayuse = Number(capacity_min_dayuse);
+    const numericMaxDayuse = Number(capacity_max_dayuse);
+
     const numericDayUse = Number(day_use);
 
-    if (isNaN(numericMax) || isNaN(numericMin) || numericMax < numericMin) {
+    // =================================================
+    // 2. 객실 그룹 검증
+    // =================================================
+    if (
+      Number.isNaN(numericRoomGroupId) ||
+      !Number.isInteger(numericRoomGroupId) ||
+      numericRoomGroupId <= 0
+    ) {
       return res.status(400).json({
         ok: false,
-        message: "capacity 값이 올바르지 않습니다.",
+        message: "room_group_id 값이 올바르지 않습니다.",
       });
     }
 
+    // =================================================
+    // 3. 숙박 인원 검증
+    // =================================================
+    if (
+      Number.isNaN(numericMin) ||
+      Number.isNaN(numericMax) ||
+      numericMin < 0 ||
+      numericMax < 0
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message: "숙박 인원 값이 올바르지 않습니다.",
+      });
+    }
+
+    if (numericMin > numericMax) {
+      return res.status(400).json({
+        ok: false,
+        message: "숙박 최소 인원은 숙박 최대 인원보다 클 수 없습니다.",
+      });
+    }
+
+    // =================================================
+    // 4. 데이유즈 인원 검증
+    // =================================================
+    if (
+      Number.isNaN(numericMinDayuse) ||
+      Number.isNaN(numericMaxDayuse) ||
+      numericMinDayuse < 0 ||
+      numericMaxDayuse < 0
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message: "데이유즈 인원 값이 올바르지 않습니다.",
+      });
+    }
+
+    if (numericMinDayuse > numericMaxDayuse) {
+      return res.status(400).json({
+        ok: false,
+        message: "데이유즈 최소 인원은 데이유즈 최대 인원보다 클 수 없습니다.",
+      });
+    }
+
+    // =================================================
+    // 5. 예약 타입 검증
+    // 0 = 숙박만
+    // 1 = 데이유즈 + 숙박
+    // 2 = 데이유즈만
+    // =================================================
     if (![0, 1, 2].includes(numericDayUse)) {
       return res.status(400).json({
         ok: false,
@@ -3019,10 +3163,7 @@ app.post("/api/room", verifyToken, async (req, res) => {
     }
 
     // =================================================
-    // 2️⃣ 예약 타입 계산
-    // 0 = 숙박만
-    // 1 = 데이+숙박
-    // 2 = 데이만
+    // 6. 실제 DB 저장값 계산
     // =================================================
     let finalDayUse = 0;
     let lodgement = 0;
@@ -3033,16 +3174,15 @@ app.post("/api/room", verifyToken, async (req, res) => {
     } else if (numericDayUse === 1) {
       finalDayUse = 1;
       lodgement = 1;
-    } else if (numericDayUse === 2) {
+    } else {
       finalDayUse = 1;
       lodgement = 0;
     }
 
-    const finalDescription =
-      description && description.trim() !== "" ? description.trim() : null;
+    const finalDescription = description?.trim() || null;
 
     // =================================================
-    // 3️⃣ INSERT
+    // 7. INSERT
     // =================================================
     const [result] = await pool.query(
       `
@@ -3050,8 +3190,13 @@ app.post("/api/room", verifyToken, async (req, res) => {
       (
         name,
         description,
-        capacity_max,
+
         capacity_min,
+        capacity_max,
+
+        capacity_min_dayuse,
+        capacity_max_dayuse,
+
         room_group_id,
         available,
         is_active,
@@ -3059,14 +3204,19 @@ app.post("/api/room", verifyToken, async (req, res) => {
         lodgement,
         reason
       )
-      VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, NULL)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, NULL)
       `,
       [
         name.trim(),
         finalDescription,
-        numericMax,
+
         numericMin,
-        room_group_id,
+        numericMax,
+
+        numericMinDayuse,
+        numericMaxDayuse,
+
+        numericRoomGroupId,
         finalDayUse,
         lodgement,
       ],
@@ -5755,6 +5905,7 @@ app.post("/api/sms-texts", async (req, res) => {
 // 임시 객실 생성
 // POST /api/extra-room
 // =====================================================
+
 app.post("/api/extra-room", async (req, res) => {
   let conn;
 
@@ -5765,8 +5916,13 @@ app.post("/api/extra-room", async (req, res) => {
       name,
       description,
       room_group_id,
+
       capacity_min,
       capacity_max,
+
+      capacity_min_dayuse,
+      capacity_max_dayuse,
+
       start_date,
       end_date,
       day_use = 1,
@@ -5789,6 +5945,18 @@ app.post("/api/extra-room", async (req, res) => {
       });
     }
 
+    if (
+      capacity_min === undefined ||
+      capacity_max === undefined ||
+      capacity_min_dayuse === undefined ||
+      capacity_max_dayuse === undefined
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "숙박 및 데이유즈 인원 정보를 입력해주세요.",
+      });
+    }
+
     if (!start_date || !end_date) {
       return res.status(400).json({
         success: false,
@@ -5804,10 +5972,18 @@ app.post("/api/extra-room", async (req, res) => {
     }
 
     const numericGroupId = Number(room_group_id);
+
     const numericCapacityMin = Number(capacity_min);
     const numericCapacityMax = Number(capacity_max);
+
+    const numericCapacityMinDayuse = Number(capacity_min_dayuse);
+    const numericCapacityMaxDayuse = Number(capacity_max_dayuse);
+
     const numericDayUse = Number(day_use);
 
+    // =====================================================
+    // 객실 그룹 검증
+    // =====================================================
     if (!Number.isInteger(numericGroupId) || numericGroupId <= 0) {
       return res.status(400).json({
         success: false,
@@ -5815,30 +5991,61 @@ app.post("/api/extra-room", async (req, res) => {
       });
     }
 
+    // =====================================================
+    // 숙박 인원 검증
+    // =====================================================
     if (
       !Number.isFinite(numericCapacityMin) ||
       !Number.isFinite(numericCapacityMax)
     ) {
       return res.status(400).json({
         success: false,
-        message: "인원 수는 숫자로 입력해주세요.",
+        message: "숙박 인원 수는 숫자로 입력해주세요.",
       });
     }
 
     if (numericCapacityMin < 0 || numericCapacityMax < 0) {
       return res.status(400).json({
         success: false,
-        message: "인원 수는 0보다 작을 수 없습니다.",
+        message: "숙박 인원 수는 0보다 작을 수 없습니다.",
       });
     }
 
     if (numericCapacityMin > numericCapacityMax) {
       return res.status(400).json({
         success: false,
-        message: "최소 인원은 최대 인원보다 클 수 없습니다.",
+        message: "숙박 최소 인원은 숙박 최대 인원보다 클 수 없습니다.",
       });
     }
 
+    // =====================================================
+    // 데이유즈 인원 검증
+    // =====================================================
+    if (
+      !Number.isFinite(numericCapacityMinDayuse) ||
+      !Number.isFinite(numericCapacityMaxDayuse)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "데이유즈 인원 수는 숫자로 입력해주세요.",
+      });
+    }
+
+    if (numericCapacityMinDayuse < 0 || numericCapacityMaxDayuse < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "데이유즈 인원 수는 0보다 작을 수 없습니다.",
+      });
+    }
+
+    if (numericCapacityMinDayuse > numericCapacityMaxDayuse) {
+      return res.status(400).json({
+        success: false,
+        message: "데이유즈 최소 인원은 데이유즈 최대 인원보다 클 수 없습니다.",
+      });
+    }
+
+    // 기존 day_use 검증 유지
     if (![0, 1, 2].includes(numericDayUse)) {
       return res.status(400).json({
         success: false,
@@ -5883,7 +6090,13 @@ app.post("/api/extra-room", async (req, res) => {
         extra_id,
         description,
         name,
+
         capacity_max,
+        capacity_min,
+
+        capacity_max_dayuse,
+        capacity_min_dayuse,
+
         room_group_id,
         start_date,
         end_date,
@@ -5891,7 +6104,6 @@ app.post("/api/extra-room", async (req, res) => {
         is_active,
         day_use,
         lodgement,
-        capacity_min,
         reason,
         disable_start,
         disable_end,
@@ -5908,7 +6120,13 @@ app.post("/api/extra-room", async (req, res) => {
         ?,
         ?,
         ?,
+
         ?,
+        ?,
+
+        ?,
+        ?,
+
         ?,
         ?,
         ?,
@@ -5916,7 +6134,6 @@ app.post("/api/extra-room", async (req, res) => {
         1,
         ?,
         0,
-        ?,
         NULL,
         NULL,
         NULL,
@@ -5934,12 +6151,17 @@ app.post("/api/extra-room", async (req, res) => {
         extraId,
         description?.trim() || String(name).trim(),
         String(name).trim(),
+
         numericCapacityMax,
+        numericCapacityMin,
+
+        numericCapacityMaxDayuse,
+        numericCapacityMinDayuse,
+
         numericGroupId,
         start_date,
         end_date,
         numericDayUse,
-        numericCapacityMin,
       ],
     );
 
@@ -5951,8 +6173,13 @@ app.post("/api/extra-room", async (req, res) => {
         extra_id: extraId,
         name: String(name).trim(),
         room_group_id: numericGroupId,
+
         capacity_min: numericCapacityMin,
         capacity_max: numericCapacityMax,
+
+        capacity_min_dayuse: numericCapacityMinDayuse,
+        capacity_max_dayuse: numericCapacityMaxDayuse,
+
         start_date,
         end_date,
         day_use: numericDayUse,
