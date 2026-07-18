@@ -149,6 +149,7 @@ app.get("/api/rooms", async (req, res) => {
         start_date,
         end_date,
         extra_id,
+        is_pet,
 
         1 AS is_extra
       FROM extra_room
@@ -2010,6 +2011,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       capacity_min_dayuse,
 
       day_use,
+      is_pet,
+
       manual_booking,
       cancel_booking,
       soogie,
@@ -2019,20 +2022,21 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     // 필수값 검증
     // =====================================================
     if (
-      !name ||
+      !name?.trim() ||
       typeof is_active === "undefined" ||
       capacity_max === undefined ||
       capacity_min === undefined ||
       capacity_max_dayuse === undefined ||
       capacity_min_dayuse === undefined ||
-      day_use === undefined
+      day_use === undefined ||
+      is_pet === undefined
     ) {
       await conn.rollback();
 
       return res.status(400).json({
         ok: false,
         message:
-          "name, is_active, capacity_max, capacity_min, capacity_max_dayuse, capacity_min_dayuse, day_use는 필수입니다.",
+          "name, is_active, capacity_max, capacity_min, capacity_max_dayuse, capacity_min_dayuse, day_use, is_pet는 필수입니다.",
       });
     }
 
@@ -2043,6 +2047,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     const numericMinDayuse = Number(capacity_min_dayuse);
 
     const numericDayUse = Number(day_use);
+    const numericIsPet = Number(is_pet);
 
     // =====================================================
     // 숙박 인원 검증
@@ -2080,13 +2085,29 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
       });
     }
 
-    // 기존 day_use 검증 유지
+    // =====================================================
+    // day_use 검증
+    // =====================================================
     if (![0, 1, 2].includes(numericDayUse)) {
       await conn.rollback();
 
       return res.status(400).json({
         ok: false,
         message: "day_use는 0, 1, 2 중 하나여야 합니다.",
+      });
+    }
+
+    // =====================================================
+    // 반려동물 수용 여부 검증
+    // 0 = 불가능
+    // 1 = 가능
+    // =====================================================
+    if (![0, 1].includes(numericIsPet)) {
+      await conn.rollback();
+
+      return res.status(400).json({
+        ok: false,
+        message: "is_pet은 0 또는 1이어야 합니다.",
       });
     }
 
@@ -2115,7 +2136,6 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
 
     // =====================================================
     // day_use / lodgement 계산
-    // 기존 로직 그대로 유지
     // =====================================================
     let finalDayUse = 0;
     let lodgement = 0;
@@ -2126,7 +2146,7 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     } else if (numericDayUse === 1) {
       finalDayUse = 1;
       lodgement = 1;
-    } else if (numericDayUse === 2) {
+    } else {
       finalDayUse = 2;
       lodgement = 0;
     }
@@ -2197,13 +2217,6 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         return !isSameBooking(booking, cancel_booking);
       });
 
-      /*
-       * 일반 객실은 기존 history 로직 유지.
-       *
-       * extra_room은 room_booking_history에 extra_id 컬럼을
-       * 추가한 뒤 별도로 연결하는 것이 안전함.
-       * 현재 room_id가 숫자 컬럼이라면 EXTRA 문자열을 넣으면 안 됨.
-       */
       if (!isExtra) {
         await conn.query(
           `
@@ -2257,13 +2270,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         : reason?.trim() || null;
 
     // =====================================================
-    // 동일 그룹 전체 인원 및 day_use 갱신
-    //
-    // 선택한 객실이 일반이든 임시든 상관없이
-    // 동일 room_group_id의 room + extra_room 모두 일괄 적용
+    // 동일 그룹의 일반 객실 일괄 갱신
     // =====================================================
-
-    // 일반 객실 일괄 갱신
     await conn.query(
       `
       UPDATE room
@@ -2273,7 +2281,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         capacity_max_dayuse = ?,
         capacity_min_dayuse = ?,
         day_use = ?,
-        lodgement = ?
+        lodgement = ?,
+        is_pet = ?
       WHERE room_group_id = ?
       `,
       [
@@ -2283,11 +2292,14 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         numericMinDayuse,
         finalDayUse,
         lodgement,
+        numericIsPet,
         roomGroupId,
       ],
     );
 
-    // 임시 객실 일괄 갱신
+    // =====================================================
+    // 동일 그룹의 임시 객실 일괄 갱신
+    // =====================================================
     await conn.query(
       `
       UPDATE extra_room
@@ -2297,7 +2309,8 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         capacity_max_dayuse = ?,
         capacity_min_dayuse = ?,
         day_use = ?,
-        lodgement = ?
+        lodgement = ?,
+        is_pet = ?
       WHERE room_group_id = ?
       `,
       [
@@ -2307,15 +2320,13 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
         numericMinDayuse,
         finalDayUse,
         lodgement,
+        numericIsPet,
         roomGroupId,
       ],
     );
 
     // =====================================================
     // 선택한 개별 객실 정보 수정
-    //
-    // 이름, 활성화, 기간, 수기예약 관련 정보만
-    // 선택한 객실 하나에 적용
     // =====================================================
     if (isExtra) {
       await conn.query(
@@ -2373,7 +2384,6 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
           finalIsActive,
           finalReason,
 
-          // 프론트가 비활성화 기간을 보낼 경우 저장
           Number(is_active) === 1 ? null : normalizeDate(disable_start) || null,
 
           Number(is_active) === 1 ? null : normalizeDate(disable_end) || null,
@@ -2416,97 +2426,126 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
     await connection.beginTransaction();
 
     const { id } = req.params;
-    const { name, is_active, reason, disable_start, disable_end } = req.body;
 
-    // ✅ 필수값 체크
-    if (!name || typeof is_active === "undefined") {
+    const { name, is_active, reason, unused_option_ids } = req.body;
+
+    // 필수값 체크
+    if (!name?.trim() || typeof is_active === "undefined") {
       await connection.rollback();
+
       return res.status(400).json({
         ok: false,
         message: "name, is_active는 필수입니다.",
       });
     }
 
-    // ✅ 비활성화 조건
-    if (Number(is_active) === 0) {
-      if (!reason || reason.trim() === "") {
-        await connection.rollback();
-        return res.status(400).json({
-          ok: false,
-          message: "비활성화 시 사유는 필수입니다.",
-        });
-      }
+    const numericIsActive = Number(is_active);
 
-      if (!disable_start || !disable_end) {
-        await connection.rollback();
-        return res.status(400).json({
-          ok: false,
-          message: "비활성 기간은 필수입니다.",
-        });
-      }
+    if (![0, 1].includes(numericIsActive)) {
+      await connection.rollback();
 
-      if (disable_start > disable_end) {
+      return res.status(400).json({
+        ok: false,
+        message: "is_active 값이 올바르지 않습니다.",
+      });
+    }
+
+    // 비활성화 시 사유 필수
+    if (numericIsActive === 0 && !reason?.trim()) {
+      await connection.rollback();
+
+      return res.status(400).json({
+        ok: false,
+        message: "비활성화 시 사유는 필수입니다.",
+      });
+    }
+
+    // unused_option_ids 정리
+    let parsedUnusedOptionIds = unused_option_ids;
+
+    if (typeof parsedUnusedOptionIds === "string") {
+      try {
+        parsedUnusedOptionIds = JSON.parse(parsedUnusedOptionIds);
+      } catch {
         await connection.rollback();
+
         return res.status(400).json({
           ok: false,
-          message: "시작일은 종료일보다 클 수 없습니다.",
+          message: "unused_option_ids 형식이 올바르지 않습니다.",
         });
       }
     }
 
-    const finalReason = Number(is_active) === 1 ? null : reason.trim();
+    if (
+      typeof parsedUnusedOptionIds !== "undefined" &&
+      !Array.isArray(parsedUnusedOptionIds)
+    ) {
+      await connection.rollback();
 
-    const finalStart = Number(is_active) === 1 ? null : disable_start;
+      return res.status(400).json({
+        ok: false,
+        message: "unused_option_ids는 배열이어야 합니다.",
+      });
+    }
 
-    const finalEnd = Number(is_active) === 1 ? null : disable_end;
+    const finalUnusedOptionIds = [
+      ...new Set(
+        (parsedUnusedOptionIds || [])
+          .map((optionId) => Number(optionId))
+          .filter((optionId) => Number.isInteger(optionId) && optionId > 0),
+      ),
+    ];
 
-    // 1️⃣ 그룹 업데이트
+    const finalReason = numericIsActive === 1 ? null : reason.trim();
+
+    // 1. 그룹 업데이트
     const [result] = await connection.query(
       `
       UPDATE room_group
-      SET 
-        name = ?, 
-        is_active = ?, 
+      SET
+        name = ?,
+        is_active = ?,
         reason = ?,
-        disable_start = ?,
-        disable_end = ?
+        unused_option_ids = ?
       WHERE id = ?
       `,
-      [name, Number(is_active), finalReason, finalStart, finalEnd, id],
+      [
+        name.trim(),
+        numericIsActive,
+        finalReason,
+        JSON.stringify(finalUnusedOptionIds),
+        id,
+      ],
     );
 
     if (result.affectedRows === 0) {
       await connection.rollback();
+
       return res.status(404).json({
         ok: false,
         message: "해당 객실 그룹을 찾을 수 없습니다.",
       });
     }
 
-    // 2️⃣ 하위 room 동기화
-
-    if (Number(is_active) === 0) {
-      // 🔥 비활성화
+    // 2. 하위 일반 객실 동기화
+    if (numericIsActive === 0) {
       await connection.query(
         `
         UPDATE room
-        SET 
+        SET
           is_active = 0,
           reason = '상위 그룹 비활성화',
-          disable_start = ?,
-          disable_end = ?
+          disable_start = NULL,
+          disable_end = NULL
         WHERE room_group_id = ?
         `,
-        [finalStart, finalEnd, id],
+        [id],
       );
-    }
-
-    if (Number(is_active) === 1) {
-      // 🔥 활성화
+    } else {
       await connection.query(
         `
         UPDATE room
-        SET 
+        SET
           is_active = 1,
           reason = NULL,
           disable_start = NULL,
@@ -2522,10 +2561,16 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
     return res.json({
       ok: true,
       message: "객실 그룹 수정 완료",
+      data: {
+        id: Number(id),
+        unused_option_ids: finalUnusedOptionIds,
+      },
     });
   } catch (error) {
     await connection.rollback();
+
     console.error("room_group update error:", error);
+
     return res.status(500).json({
       ok: false,
       message: "객실 그룹 수정 중 오류 발생",
@@ -2534,7 +2579,6 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
     connection.release();
   }
 });
-
 app.post("/api/room/:id/manual-booking", verifyToken, async (req, res) => {
   const conn = await pool.getConnection();
 
@@ -3062,6 +3106,7 @@ app.post("/api/room", verifyToken, async (req, res) => {
       capacity_max_dayuse,
 
       day_use,
+      is_pet,
     } = req.body;
 
     // =================================================
@@ -3076,12 +3121,13 @@ app.post("/api/room", verifyToken, async (req, res) => {
       capacity_max === undefined ||
       capacity_min_dayuse === undefined ||
       capacity_max_dayuse === undefined ||
-      day_use === undefined
+      day_use === undefined ||
+      is_pet === undefined
     ) {
       return res.status(400).json({
         ok: false,
         message:
-          "name, room_group_id, capacity_min, capacity_max, capacity_min_dayuse, capacity_max_dayuse, day_use는 필수입니다.",
+          "name, room_group_id, capacity_min, capacity_max, capacity_min_dayuse, capacity_max_dayuse, day_use, is_pet는 필수입니다.",
       });
     }
 
@@ -3094,6 +3140,7 @@ app.post("/api/room", verifyToken, async (req, res) => {
     const numericMaxDayuse = Number(capacity_max_dayuse);
 
     const numericDayUse = Number(day_use);
+    const numericIsPet = Number(is_pet);
 
     // =================================================
     // 2. 객실 그룹 검증
@@ -3167,7 +3214,19 @@ app.post("/api/room", verifyToken, async (req, res) => {
     }
 
     // =================================================
-    // 6. 실제 DB 저장값 계산
+    // 6. 반려동물 수용 여부 검증
+    // 0 = 불가능
+    // 1 = 가능
+    // =================================================
+    if (![0, 1].includes(numericIsPet)) {
+      return res.status(400).json({
+        ok: false,
+        message: "is_pet은 0 또는 1이어야 합니다.",
+      });
+    }
+
+    // =================================================
+    // 7. 실제 DB 저장값 계산
     // =================================================
     let finalDayUse = 0;
     let lodgement = 0;
@@ -3186,7 +3245,7 @@ app.post("/api/room", verifyToken, async (req, res) => {
     const finalDescription = description?.trim() || null;
 
     // =================================================
-    // 7. INSERT
+    // 8. INSERT
     // =================================================
     const [result] = await pool.query(
       `
@@ -3206,9 +3265,10 @@ app.post("/api/room", verifyToken, async (req, res) => {
         is_active,
         day_use,
         lodgement,
+        is_pet,
         reason
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, NULL)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, NULL)
       `,
       [
         name.trim(),
@@ -3223,6 +3283,7 @@ app.post("/api/room", verifyToken, async (req, res) => {
         numericRoomGroupId,
         finalDayUse,
         lodgement,
+        numericIsPet,
       ],
     );
 
@@ -3240,7 +3301,6 @@ app.post("/api/room", verifyToken, async (req, res) => {
     });
   }
 });
-
 const messageService = new SolapiMessageService(
   process.env.SOL_API_KEY,
   process.env.SOL_API_SECRET,
@@ -5930,6 +5990,7 @@ app.post("/api/extra-room", async (req, res) => {
       start_date,
       end_date,
       day_use = 1,
+      is_pet,
     } = req.body || {};
 
     // =====================================================
@@ -5961,6 +6022,13 @@ app.post("/api/extra-room", async (req, res) => {
       });
     }
 
+    if (is_pet === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "반려동물 수용 여부를 선택해주세요.",
+      });
+    }
+
     if (!start_date || !end_date) {
       return res.status(400).json({
         success: false,
@@ -5984,6 +6052,7 @@ app.post("/api/extra-room", async (req, res) => {
     const numericCapacityMaxDayuse = Number(capacity_max_dayuse);
 
     const numericDayUse = Number(day_use);
+    const numericIsPet = Number(is_pet);
 
     // =====================================================
     // 객실 그룹 검증
@@ -6049,11 +6118,25 @@ app.post("/api/extra-room", async (req, res) => {
       });
     }
 
-    // 기존 day_use 검증 유지
+    // =====================================================
+    // 예약 타입 검증
+    // =====================================================
     if (![0, 1, 2].includes(numericDayUse)) {
       return res.status(400).json({
         success: false,
         message: "예약 타입 값이 올바르지 않습니다.",
+      });
+    }
+
+    // =====================================================
+    // 반려동물 수용 여부 검증
+    // 0 = 불가능
+    // 1 = 가능
+    // =====================================================
+    if (![0, 1].includes(numericIsPet)) {
+      return res.status(400).json({
+        success: false,
+        message: "is_pet은 0 또는 1이어야 합니다.",
       });
     }
 
@@ -6108,6 +6191,7 @@ app.post("/api/extra-room", async (req, res) => {
         is_active,
         day_use,
         lodgement,
+        is_pet,
         reason,
         disable_start,
         disable_end,
@@ -6138,6 +6222,7 @@ app.post("/api/extra-room", async (req, res) => {
         1,
         ?,
         0,
+        ?,
         NULL,
         NULL,
         NULL,
@@ -6166,6 +6251,7 @@ app.post("/api/extra-room", async (req, res) => {
         start_date,
         end_date,
         numericDayUse,
+        numericIsPet,
       ],
     );
 
@@ -6187,6 +6273,7 @@ app.post("/api/extra-room", async (req, res) => {
         start_date,
         end_date,
         day_use: numericDayUse,
+        is_pet: numericIsPet,
       },
     });
   } catch (error) {
