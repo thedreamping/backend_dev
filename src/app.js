@@ -2418,7 +2418,6 @@ app.put("/api/room/:id", verifyToken, async (req, res) => {
     conn.release();
   }
 });
-
 app.put("/api/room-group/:id", verifyToken, async (req, res) => {
   const connection = await pool.getConnection();
 
@@ -2427,15 +2426,37 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
 
     const { id } = req.params;
 
-    const { name, is_active, reason, unused_option_ids } = req.body;
+    const { name, is_active, reason, unused_option_ids, contract_txt } =
+      req.body;
 
-    // 필수값 체크
-    if (!name?.trim() || typeof is_active === "undefined") {
+    const numericId = Number(id);
+
+    // 1. 그룹 ID 검사
+    if (!Number.isInteger(numericId) || numericId <= 0) {
       await connection.rollback();
 
       return res.status(400).json({
         ok: false,
-        message: "name, is_active는 필수입니다.",
+        message: "객실 그룹 ID가 올바르지 않습니다.",
+      });
+    }
+
+    // 2. 기본값 검사
+    if (typeof name !== "string" || !name.trim()) {
+      await connection.rollback();
+
+      return res.status(400).json({
+        ok: false,
+        message: "그룹명은 필수입니다.",
+      });
+    }
+
+    if (typeof is_active === "undefined") {
+      await connection.rollback();
+
+      return res.status(400).json({
+        ok: false,
+        message: "is_active는 필수입니다.",
       });
     }
 
@@ -2450,18 +2471,28 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
       });
     }
 
-    // 비활성화 시 사유 필수
-    if (numericIsActive === 0 && !reason?.trim()) {
+    if (
+      numericIsActive === 0 &&
+      (typeof reason !== "string" || !reason.trim())
+    ) {
       await connection.rollback();
 
       return res.status(400).json({
         ok: false,
-        message: "비활성화 시 사유는 필수입니다.",
+        message: "비활성화 시 사유를 입력해주세요.",
       });
     }
 
-    // unused_option_ids 정리
+    // 3. unused_option_ids 정리
     let parsedUnusedOptionIds = unused_option_ids;
+
+    if (
+      typeof parsedUnusedOptionIds === "undefined" ||
+      parsedUnusedOptionIds === null ||
+      parsedUnusedOptionIds === ""
+    ) {
+      parsedUnusedOptionIds = [];
+    }
 
     if (typeof parsedUnusedOptionIds === "string") {
       try {
@@ -2476,10 +2507,7 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
       }
     }
 
-    if (
-      typeof parsedUnusedOptionIds !== "undefined" &&
-      !Array.isArray(parsedUnusedOptionIds)
-    ) {
+    if (!Array.isArray(parsedUnusedOptionIds)) {
       await connection.rollback();
 
       return res.status(400).json({
@@ -2490,15 +2518,104 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
 
     const finalUnusedOptionIds = [
       ...new Set(
-        (parsedUnusedOptionIds || [])
+        parsedUnusedOptionIds
           .map((optionId) => Number(optionId))
           .filter((optionId) => Number.isInteger(optionId) && optionId > 0),
       ),
     ];
 
+    // 4. contract_txt 정리
+    // 프론트에서 JSON.stringify()한 문자열로 전송됨
+    let parsedContractSections = contract_txt;
+
+    if (
+      typeof parsedContractSections === "undefined" ||
+      parsedContractSections === null ||
+      parsedContractSections === ""
+    ) {
+      parsedContractSections = [];
+    }
+
+    if (typeof parsedContractSections === "string") {
+      try {
+        parsedContractSections = JSON.parse(parsedContractSections);
+      } catch {
+        await connection.rollback();
+
+        return res.status(400).json({
+          ok: false,
+          message: "안내사항 JSON 형식이 올바르지 않습니다.",
+        });
+      }
+    }
+
+    if (!Array.isArray(parsedContractSections)) {
+      await connection.rollback();
+
+      return res.status(400).json({
+        ok: false,
+        message: "안내사항 데이터는 배열이어야 합니다.",
+      });
+    }
+
+    // 5. contract_txt 내부 데이터 정리
+    const finalContractSections = parsedContractSections
+      .map((section) => {
+        if (!section || typeof section !== "object" || Array.isArray(section)) {
+          return null;
+        }
+
+        const type = ["section", "star", "privacy"].includes(section.type)
+          ? section.type
+          : "section";
+
+        const title = String(section.title || "").trim();
+        const intro = String(section.intro || "").trim();
+
+        const items = Array.isArray(section.items)
+          ? section.items
+              .map((item) => String(item || "").trim())
+              .filter(Boolean)
+          : [];
+
+        if (type === "star") {
+          return {
+            type: "star",
+            items,
+          };
+        }
+
+        if (type === "privacy") {
+          return {
+            type: "privacy",
+            title,
+            intro,
+            items,
+          };
+        }
+
+        return {
+          type: "section",
+          title,
+          items,
+        };
+      })
+      .filter(
+        (section) =>
+          section &&
+          (section.title || section.intro || section.items.length > 0),
+      );
+
+    const finalName = name.trim();
+
     const finalReason = numericIsActive === 1 ? null : reason.trim();
 
-    // 1. 그룹 업데이트
+    // JSON 컬럼에 넣을 유효한 JSON 문자열
+    const finalUnusedOptionIdsJson = JSON.stringify(finalUnusedOptionIds);
+
+    const finalContractTxtJson = JSON.stringify(finalContractSections);
+
+    // 6. room_group 수정
     const [result] = await connection.query(
       `
       UPDATE room_group
@@ -2506,15 +2623,17 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
         name = ?,
         is_active = ?,
         reason = ?,
-        unused_option_ids = ?
+        unused_option_ids = ?,
+        contract_txt = ?
       WHERE id = ?
       `,
       [
-        name.trim(),
+        finalName,
         numericIsActive,
         finalReason,
-        JSON.stringify(finalUnusedOptionIds),
-        id,
+        finalUnusedOptionIdsJson,
+        finalContractTxtJson,
+        numericId,
       ],
     );
 
@@ -2527,43 +2646,18 @@ app.put("/api/room-group/:id", verifyToken, async (req, res) => {
       });
     }
 
-    // 2. 하위 일반 객실 동기화
-    if (numericIsActive === 0) {
-      await connection.query(
-        `
-        UPDATE room
-        SET
-          is_active = 0,
-          reason = '상위 그룹 비활성화',
-          disable_start = NULL,
-          disable_end = NULL
-        WHERE room_group_id = ?
-        `,
-        [id],
-      );
-    } else {
-      await connection.query(
-        `
-        UPDATE room
-        SET
-          is_active = 1,
-          reason = NULL,
-          disable_start = NULL,
-          disable_end = NULL
-        WHERE room_group_id = ?
-        `,
-        [id],
-      );
-    }
-
     await connection.commit();
 
     return res.json({
       ok: true,
       message: "객실 그룹 수정 완료",
       data: {
-        id: Number(id),
+        id: numericId,
+        name: finalName,
+        is_active: numericIsActive,
+        reason: finalReason,
         unused_option_ids: finalUnusedOptionIds,
+        contract_txt: finalContractSections,
       },
     });
   } catch (error) {
