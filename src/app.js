@@ -5722,7 +5722,6 @@ app.get("/api/naver-status", async (req, res) => {
     });
   }
 });
-
 app.get("/api/reservation_history", async (req, res) => {
   try {
     let {
@@ -5733,11 +5732,9 @@ app.get("/api/reservation_history", async (req, res) => {
       guest_phone = "",
       memo = "",
 
-      // 예약기간
       check_in_from = "",
       check_out_to = "",
 
-      // 결제일
       payment_from = "",
       payment_to = "",
     } = req.query;
@@ -5765,55 +5762,59 @@ app.get("/api/reservation_history", async (req, res) => {
     }
 
     if (memo) {
-      where.push(`memo LIKE ?`);
-      params.push(`%${memo}%`);
+      where.push(`
+        (
+          memo LIKE ?
+          OR manager_memo LIKE ?
+        )
+      `);
+
+      params.push(`%${memo}%`, `%${memo}%`);
     }
 
-    // 예약기간 검색
     if (check_in_from && check_out_to) {
       where.push(`
         DATE(check_in) >= ?
         AND DATE(check_out) <= ?
       `);
+
       params.push(check_in_from, check_out_to);
     }
 
-    // 결제일 검색
-    // 네이버 / 홈페이지만 검색하고 수기예약은 제외
     const paymentDateSql = `
-  CASE
-    WHEN source = 'manual'
-      OR source = 'website'
-      OR source LIKE 'SITE_%'
-      OR booking_id LIKE 'SITE_%'
-    THEN created_at
+      CASE
+        WHEN source = 'manual'
+          OR source = 'website'
+          OR source LIKE 'SITE_%'
+          OR booking_id LIKE 'SITE_%'
+        THEN created_at
 
-    ELSE DATE_ADD(
-      STR_TO_DATE(
-        SUBSTRING(
-          JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date')),
-          1,
-          19
-        ),
-        '%Y-%m-%dT%H:%i:%s'
-      ),
-      INTERVAL 9 HOUR
-    )
-  END
-`;
+        ELSE DATE_ADD(
+          STR_TO_DATE(
+            SUBSTRING(
+              JSON_UNQUOTE(JSON_EXTRACT(payload, '$.payment_date')),
+              1,
+              19
+            ),
+            '%Y-%m-%dT%H:%i:%s'
+          ),
+          INTERVAL 9 HOUR
+        )
+      END
+    `;
 
     if (payment_from) {
       where.push(`
-    ${paymentDateSql} >= ?
-  `);
+        ${paymentDateSql} >= ?
+      `);
 
       params.push(`${payment_from} 00:00:00`);
     }
 
     if (payment_to) {
       where.push(`
-    ${paymentDateSql} < DATE_ADD(?, INTERVAL 1 DAY)
-  `);
+        ${paymentDateSql} < DATE_ADD(?, INTERVAL 1 DAY)
+      `);
 
       params.push(`${payment_to} 00:00:00`);
     }
@@ -5847,6 +5848,7 @@ app.get("/api/reservation_history", async (req, res) => {
         price,
         product_name,
         memo,
+        manager_memo,
         canceled,
         payload,
         created_at
@@ -5868,11 +5870,99 @@ app.get("/api/reservation_history", async (req, res) => {
       list: rows,
     });
   } catch (err) {
-    console.error(err);
+    console.error("reservation_history 조회 실패:", err);
 
     res.status(500).json({
       ok: false,
       message: "reservation_history 조회 실패",
+    });
+  }
+});
+
+app.post("/api/reservation_history/:id/manager-memo", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { manager_memo } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        ok: false,
+        message: "예약 히스토리 ID가 필요합니다.",
+      });
+    }
+
+    if (
+      manager_memo !== undefined &&
+      manager_memo !== null &&
+      typeof manager_memo !== "string"
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message: "manager_memo는 문자열이어야 합니다.",
+      });
+    }
+
+    const [historyRows] = await pool.query(
+      `
+        SELECT
+          id,
+          source,
+          booking_id
+        FROM room_booking_history
+        WHERE id = ?
+        LIMIT 1
+        `,
+      [id],
+    );
+
+    if (historyRows.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "해당 예약 히스토리를 찾을 수 없습니다.",
+      });
+    }
+
+    const history = historyRows[0];
+
+    const sourceText = String(history.source || "");
+    const bookingIdText = String(history.booking_id || "");
+
+    const isManagerMemoTarget =
+      sourceText === "naver" ||
+      sourceText === "website" ||
+      sourceText.startsWith("SITE_") ||
+      bookingIdText.startsWith("SITE_");
+
+    if (!isManagerMemoTarget) {
+      return res.status(400).json({
+        ok: false,
+        message:
+          "네이버 또는 홈페이지 예약만 관리자 메모를 작성할 수 있습니다.",
+      });
+    }
+
+    const memoText = manager_memo ?? "";
+
+    await pool.query(
+      `
+        UPDATE room_booking_history
+        SET manager_memo = ?
+        WHERE id = ?
+        `,
+      [memoText, id],
+    );
+
+    res.json({
+      ok: true,
+      message: "관리자 메모가 저장되었습니다.",
+      manager_memo: memoText,
+    });
+  } catch (err) {
+    console.error("관리자 메모 저장 실패:", err);
+
+    res.status(500).json({
+      ok: false,
+      message: "관리자 메모 저장에 실패했습니다.",
     });
   }
 });
